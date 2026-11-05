@@ -1,0 +1,1420 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#64666b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="お絵描き">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<title>お絵描きツール</title>
+<style>
+/* Layout: 灰色の作業面にキャンバス。カラー・ブラシ・レイヤーの窓が左に浮かぶ(ドラッグで移動)。
+   スケッチの注釈色だったピンクを、選択中の印だけに使う。 */
+:root {
+  --ws: #b3b5b9;
+  --panel: #64666b;
+  --panel-hi: #74767b;
+  --well: #c1c3c7;
+  --well-dim: #a8aaae;
+  --ink: #1f2023;
+  --on-panel: #f3f4f5;
+  --accent: #e0458f;
+  --sheet: #eceef0;
+  --paper: #ffffff;
+  --shadow: 0 8px 22px rgba(24, 25, 30, .30), 0 0 0 1px rgba(0, 0, 0, .12);
+  --font: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+html, body { height: 100%; }
+body {
+  margin: 0; position: relative; overflow: hidden;
+  background: var(--ws); color: var(--ink);
+  font: 12px/1.4 var(--font);
+  overscroll-behavior: none;
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; }
+
+#stage { position: absolute; inset: 0; touch-action: none; cursor: crosshair; overflow: hidden; }
+#board {
+  position: absolute; left: 0; top: 0; transform-origin: 0 0;
+  background: var(--paper); box-shadow: 0 2px 14px rgba(0, 0, 0, .25); will-change: transform;
+}
+#board.px canvas { image-rendering: pixelated; }
+.layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+
+#ui { position: absolute; inset: 0; pointer-events: none; }
+.win {
+  position: absolute; width: 224px; box-sizing: border-box;
+  background: var(--panel); color: var(--on-panel);
+  border-radius: 8px; box-shadow: var(--shadow); overflow: hidden;
+  pointer-events: auto; touch-action: pan-y;
+  display: flex; flex-direction: column;
+}
+.dots {
+  width: 10px; height: 14px; flex: none;
+  background: radial-gradient(circle, rgba(255, 255, 255, .6) 1.2px, transparent 1.7px) 0 0 / 5px 5px;
+}
+.wh {
+  display: flex; flex: none; align-items: center; gap: 7px; height: 26px; padding: 0 10px;
+  background: var(--panel-hi); font-size: 11px; letter-spacing: .08em;
+  cursor: grab; touch-action: none;
+}
+.wh .t { flex: 1; }
+.wh .info { font-variant-numeric: tabular-nums; letter-spacing: 0; display: flex; align-items: center; gap: 6px; }
+
+.win.tool { flex-direction: row; flex-wrap: wrap; align-items: center; align-content: flex-start; gap: 5px; padding: 6px 8px; }
+.win.tool .grip { display: flex; align-items: center; height: 34px; padding-right: 3px; cursor: grab; touch-action: none; }
+
+.ib {
+  width: 34px; height: 34px; flex: none; border: 0; border-radius: 6px; padding: 0;
+  background: var(--well); color: var(--ink);
+  display: grid; place-items: center; cursor: pointer; touch-action: manipulation;
+}
+.ib svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ib:active { transform: scale(.95); }
+.ib:disabled { opacity: .38; cursor: default; transform: none; }
+.ib.on { background: var(--accent); color: #fff; }
+:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+
+/* color */
+.chip i { width: 14px; height: 14px; border-radius: 3px; display: block; box-shadow: 0 0 0 1px rgba(255, 255, 255, .7); }
+.ringwrap { position: relative; flex: none; width: 164px; height: 164px; margin: 8px auto; touch-action: none; }
+.ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, hsl(0 100% 50%), hsl(60 100% 50%), hsl(120 100% 50%), hsl(180 100% 50%), hsl(240 100% 50%), hsl(300 100% 50%), hsl(360 100% 50%));
+  -webkit-mask: radial-gradient(circle closest-side, transparent 77.5%, #000 78.5%, #000 98%, transparent 99.3%);
+          mask: radial-gradient(circle closest-side, transparent 77.5%, #000 78.5%, #000 98%, transparent 99.3%);
+}
+.sv {
+  position: absolute; left: 50%; top: 50%; width: 52.4%; height: 52.4%; margin: -26.2% 0 0 -26.2%;
+  background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, var(--hue, red));
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35);
+}
+.knob {
+  position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(0, 0, 0, .25);
+  pointer-events: none;
+}
+
+/* brush */
+.brows {
+  display: grid; gap: 6px; padding: 8px 8px 6px; align-content: start;
+  flex: 1 1 122px; min-height: 44px; box-sizing: border-box;
+  overflow-y: auto; touch-action: pan-y; scrollbar-width: thin;
+}
+.brow {
+  position: relative; display: block; height: 32px; padding: 0; border: 0; border-radius: 6px;
+  background: var(--well); cursor: pointer; overflow: hidden; touch-action: manipulation;
+}
+.brow canvas { display: block; width: 100%; height: 100%; }
+.brow span { position: absolute; left: 8px; top: 3px; font-size: 10px; letter-spacing: .06em; color: var(--ink); }
+.brow.sel { box-shadow: 0 0 0 2px var(--accent); }
+.sliders { display: grid; flex: none; gap: 0; padding: 2px 10px 14px; }
+.sl-h { display: flex; justify-content: space-between; font-size: 11px; margin-top: 2px; }
+.sl-h b { font-weight: 500; font-variant-numeric: tabular-nums; }
+input[type=range] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0;
+  background: transparent; touch-action: none; cursor: pointer;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 3px;
+  background: linear-gradient(to right, var(--accent) var(--p, 50%), var(--well) var(--p, 50%));
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 22px; height: 22px; margin-top: -8px; border-radius: 50%;
+  background: #f6f7f8; border: 2px solid var(--accent); box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+}
+input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--well); }
+input[type=range]::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--accent); }
+input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #f6f7f8; border: 2px solid var(--accent); }
+
+/* layers */
+.lbody { display: flex; flex: 1; min-height: 0; gap: 6px; padding: 6px; }
+#llist { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; touch-action: pan-y; scrollbar-width: thin; }
+.lrow {
+  display: flex; align-items: center; gap: 4px; height: 40px; flex: none; padding: 0 6px 0 2px;
+  background: var(--well); color: var(--ink); border-radius: 6px; cursor: pointer; touch-action: manipulation;
+}
+.lrow.sel { box-shadow: 0 0 0 2px var(--accent); }
+.lrow.hid { color: #55575c; }
+.lrow.hid .th { opacity: .4; }
+.eye { width: 28px; height: 34px; border: 0; background: transparent; padding: 0; display: grid; place-items: center; cursor: pointer; color: inherit; flex: none; }
+.eye svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.th { flex: none; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .3); display: block; }
+.lname { flex: 1; min-width: 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 3px; }
+.lock { width: 12px; height: 12px; flex: none; fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.lbtns { display: flex; flex-direction: column; flex: none; gap: 6px; }
+
+.hbtn {
+  width: 34px; height: 22px; flex: none; margin-right: -6px; border: 0; border-radius: 5px; padding: 0;
+  background: transparent; color: var(--on-panel); display: grid; place-items: center; cursor: pointer; touch-action: manipulation;
+}
+.hbtn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.hbtn[aria-pressed=true] { background: rgba(255, 255, 255, .22); }
+.rz {
+  position: absolute; right: 0; bottom: 0; width: 20px; height: 20px; z-index: 2; cursor: nwse-resize; touch-action: none;
+  background: linear-gradient(135deg, transparent 0 52%, rgba(255, 255, 255, .6) 52% 60%, transparent 60% 72%, rgba(255, 255, 255, .6) 72% 80%, transparent 80%);
+}
+.win.tool .rz { width: 12px; height: 12px; }
+#loupe {
+  position: fixed; width: 56px; height: 56px; border-radius: 50%; border: 3px solid #fff; box-sizing: border-box;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 4px 12px rgba(0, 0, 0, .35); pointer-events: none; z-index: 1500;
+}
+
+#toast {
+  position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+  background: rgba(32, 33, 36, .92); color: #fff; font-size: 12px; padding: 8px 14px; border-radius: 16px;
+  pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 2000; white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis;
+}
+#toast.show { opacity: 1; }
+
+/* dialogs */
+#modal { position: absolute; inset: 0; background: rgba(30, 31, 34, .55); display: grid; place-items: center; z-index: 1000; padding: 16px; box-sizing: border-box; }
+.sheet {
+  background: var(--sheet); color: var(--ink); border-radius: 10px; padding: 18px 18px 16px;
+  width: 100%; max-width: 520px; max-height: 100%; overflow: auto; box-shadow: 0 16px 48px rgba(0, 0, 0, .35); box-sizing: border-box;
+}
+.sheet h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; letter-spacing: .04em; text-wrap: balance; }
+.sheet p { margin: 0 0 12px; font-size: 12px; color: #3d3f44; }
+.sheet .warn { color: #9c1f58; }
+.grp { margin: 10px 0 6px; font-size: 11px; letter-spacing: .12em; color: #3d3f44; }
+.sizes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.size {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 9px;
+  background: #fff; border: 2px solid transparent; border-radius: 8px; cursor: pointer; touch-action: manipulation;
+}
+.size:hover, .size:active { border-color: var(--accent); }
+.size .box { height: 68px; display: grid; place-items: center; }
+.size .box i { display: block; background: #d7d9dd; box-shadow: inset 0 0 0 1.5px #8a8c92; }
+.size b { font-weight: 600; font-size: 12px; font-variant-numeric: tabular-nums; }
+.size small { font-size: 10px; color: #4a4c52; }
+.row { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; flex-wrap: wrap; }
+.btn { border: 0; border-radius: 6px; padding: 9px 16px; background: #d6d8dc; font-size: 13px; cursor: pointer; touch-action: manipulation; }
+.btn.main { background: var(--ink); color: #fff; }
+.exp { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.exp .btn { padding: 14px 8px; background: #fff; text-align: center; line-height: 1.5; }
+.exp .btn b { display: block; font-size: 15px; letter-spacing: .06em; }
+.exp .btn small { color: #4a4c52; font-size: 10px; }
+#expStatus { margin: 10px 0 0; min-height: 1.4em; font-size: 12px; }
+#expImg { display: block; max-width: 100%; max-height: 50vh; margin: 10px auto 0; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .2); -webkit-user-select: auto; user-select: auto; -webkit-touch-callout: default; }
+
+/* layer reorder handle */
+.lgrip { width: 24px; height: 34px; flex: none; border: 0; background: transparent; padding: 0; display: grid; place-items: center; color: inherit; cursor: grab; touch-action: none; opacity: .7; }
+.lgrip svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.lrow.drag { opacity: .55; }
+.lrow.dl-top { box-shadow: 0 -3px 0 0 var(--accent); }
+.lrow.dl-bot { box-shadow: 0 3px 0 0 var(--accent); }
+.lrow.sel.dl-top { box-shadow: 0 -3px 0 0 var(--accent), 0 0 0 2px var(--accent); }
+.lrow.sel.dl-bot { box-shadow: 0 3px 0 0 var(--accent), 0 0 0 2px var(--accent); }
+
+/* save / backup indicators on the works button */
+#b-works { position: relative; }
+#b-works::after { content: ''; position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: transparent; }
+#b-works[data-s=pending]::after { background: var(--accent); }
+#b-works[data-s=err]::after { background: #d23; box-shadow: 0 0 0 2px #fff; }
+#b-works[data-s=nag]::after { background: transparent; box-shadow: 0 0 0 2px var(--accent) inset; }
+
+/* works dialog */
+#dlg-works { max-width: 560px; }
+#worksList { display: flex; flex-direction: column; gap: 6px; max-height: 210px; overflow-y: auto; touch-action: pan-y; }
+.wk { display: flex; align-items: center; gap: 10px; padding: 6px 8px; background: #fff; border-radius: 8px; border: 2px solid transparent; }
+.wk.cur { border-color: var(--accent); }
+.wk img { width: 52px; height: 52px; object-fit: contain; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .2); flex: none; }
+.wk .meta { flex: 1; min-width: 0; font-size: 12px; line-height: 1.5; }
+.wk .meta b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.wk .meta small { display: block; color: #4a4c52; font-size: 10px; }
+.wk .btn { padding: 8px 12px; font-size: 12px; }
+.wk .btn.danger.arm { background: #c92a5e; color: #fff; }
+.wk-empty { font-size: 12px; color: #4a4c52; padding: 8px 2px; }
+.bk { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bk .btn { background: #fff; padding: 12px 8px; line-height: 1.4; }
+#bkStatus { margin: 0 0 8px; }
+#bkStatus.warn { color: #9c1f58; }
+
+@media (prefers-reduced-motion: reduce) { #toast { transition: none; } }
+</style>
+</head>
+<body>
+<div id="stage" aria-label="キャンバス"><div id="board"></div></div>
+
+<div id="ui">
+  <section class="win tool" id="w-tool" aria-label="ツールバー">
+    <div class="grip" title="ドラッグで移動"><i class="dots"></i></div>
+    <button class="ib" id="b-works" data-icon="new" aria-label="作品・新規キャンバス・バックアップ" title="作品・新規・バックアップ"></button>
+    <button class="ib" id="b-fit" data-icon="fit" aria-label="画面に合わせる" title="画面に合わせる"></button>
+    <button class="ib" id="b-export" data-icon="export" aria-label="書き出し" title="書き出し"></button>
+    <button class="ib" id="b-undo" data-icon="undo" aria-label="元に戻す" title="元に戻す(2本指タップ)"></button>
+    <button class="ib" id="b-redo" data-icon="redo" aria-label="やり直す" title="やり直す(3本指タップ)"></button>
+  </section>
+
+  <section class="win" id="w-color" aria-label="カラー">
+    <header class="wh"><i class="dots"></i><span class="t">カラー</span><span class="info chip"><i id="sw"></i><span id="hex">#2A2C33</span></span></header>
+    <div class="ringwrap" id="ring">
+      <div class="ring"></div>
+      <div class="sv" id="sv"></div>
+      <i class="knob" id="svk"></i>
+      <i class="knob" id="hk"></i>
+    </div>
+  </section>
+
+  <section class="win" id="w-brush" aria-label="ブラシ">
+    <header class="wh"><i class="dots"></i><span class="t">ブラシ</span><span class="info" id="pv">筆圧 -</span><button class="hbtn" id="b-adv" data-icon="sliders" aria-pressed="false" aria-label="最小サイズと筆圧感度の表示切り替え" title="最小サイズ・筆圧感度の表示切り替え"></button></header>
+    <div class="brows" id="brows">
+      <button class="brow sel" data-tool="pencil" aria-label="鉛筆"><canvas width="416" height="64"></canvas><span>鉛筆</span></button>
+      <button class="brow" data-tool="eraser" aria-label="消しゴム"><canvas width="416" height="64"></canvas><span>消しゴム</span></button>
+    </div>
+    <div class="sliders">
+      <div class="sl-h"><span>サイズ</span><b id="v-size">14px</b></div>
+      <input type="range" id="r-size" min="0" max="1000" step="1" aria-label="サイズ">
+      <div class="sl-h adv"><span>最小サイズ</span><b id="v-min">20%</b></div>
+      <input class="adv" type="range" id="r-min" min="0" max="100" step="1" aria-label="最小サイズ">
+      <div class="sl-h"><span>不透明度</span><b id="v-op">100%</b></div>
+      <input type="range" id="r-op" min="1" max="100" step="1" aria-label="不透明度">
+      <div class="sl-h adv"><span>筆圧感度(全ブラシ共通)</span><b id="v-sens">60</b></div>
+      <input class="adv" type="range" id="r-sens" min="0" max="100" step="1" aria-label="筆圧感度">
+    </div>
+  </section>
+
+  <section class="win" id="w-layer" aria-label="レイヤー">
+    <header class="wh"><i class="dots"></i><span class="t">レイヤー</span><span class="info" id="lcount">1 / 5</span></header>
+    <div class="lbody">
+      <div id="llist"></div>
+      <div class="lbtns">
+        <button class="ib" id="l-add" data-icon="plus" aria-label="レイヤーを追加" title="追加"></button>
+        <button class="ib" id="l-del" data-icon="minus" aria-label="レイヤーを削除" title="削除"></button>
+        <button class="ib" id="l-dup" data-icon="dup" aria-label="レイヤーを複製" title="複製"></button>
+        <button class="ib" id="l-merge" data-icon="merge" aria-label="下のレイヤーと結合" title="下のレイヤーと結合"></button>
+        <button class="ib" id="l-lock" data-icon="lock" aria-label="アルファロック" title="アルファロック"></button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="modal" hidden>
+  <div class="sheet" id="dlg-works" hidden role="dialog" aria-labelledby="wkTitle">
+    <h2 id="wkTitle">作品</h2>
+    <p>描いた絵はこの端末に自動で保存されます。新しいキャンバスを作っても、いまの絵は作品として残ります。</p>
+    <div id="worksList"></div>
+    <div class="grp">新しいキャンバス(サイズが大きいほどレイヤーは少なくなります)</div>
+    <div class="grp">1 : 1</div>
+    <div class="sizes" id="sizes-sq"></div>
+    <div class="grp">3 : 4</div>
+    <div class="sizes" id="sizes-pt"></div>
+    <div class="grp">バックアップ</div>
+    <p id="bkStatus"></p>
+    <div class="bk">
+      <button class="btn" id="bk-out"><b>書き出す</b><br><small>全作品を .zip にまとめて保存</small></button>
+      <button class="btn" id="bk-in"><b>読み込む</b><br><small>書き出した .zip から復元</small></button>
+    </div>
+    <input type="file" id="bk-file" accept=".zip,application/zip" hidden>
+    <div class="row"><button class="btn main" id="worksClose">閉じる</button></div>
+  </div>
+
+  <div class="sheet" id="dlg-export" hidden role="dialog" aria-labelledby="expTitle">
+    <h2 id="expTitle">書き出し</h2>
+    <p>表示しているレイヤーを重ねた絵を保存します。</p>
+    <div class="exp">
+      <button class="btn" id="exp-png"><b>PNG</b><small>背景は透明のまま</small></button>
+      <button class="btn" id="exp-jpg"><b>JPG</b><small>背景は白で塗りつぶし</small></button>
+    </div>
+    <p id="expStatus"></p>
+    <img id="expImg" alt="書き出した絵" hidden>
+    <div class="row"><button class="btn main" id="expClose">閉じる</button></div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/* ---------- icons ---------- */
+const ICONS = {
+  new: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M12 11v6M9 14h6"/>',
+  fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  export: '<path d="M12 15V4M8 8l4-4 4 4"/><path d="M5 14v6h14v-6"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h9a6 6 0 0 1 0 12h-4"/>',
+  redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9h-9a6 6 0 0 0 0 12h4"/>',
+  sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  minus: '<path d="M5 12h14"/>',
+  dup: '<rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
+  merge: '<path d="M12 3v10M8 9l4 4 4-4"/><path d="M5 17h14M5 21h14"/>',
+  lock: '<rect x="4" y="4" width="16" height="16" rx="1.5"/><rect x="4" y="4" width="8" height="8" fill="currentColor" stroke="none"/><rect x="12" y="12" width="8" height="8" fill="currentColor" stroke="none"/>'
+};
+const EYE_ON = '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+const EYE_OFF = '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" opacity=".45"/><path d="M4 4l16 16"/>';
+$$('[data-icon]').forEach(b => { b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + ICONS[b.dataset.icon] + '</svg>'; });
+
+/* ---------- state ---------- */
+const stage = $('#stage'), board = $('#board'), ui = $('#ui');
+const SIZES = [
+  { w: 512, h: 512, g: 'sq' }, { w: 1024, h: 1024, g: 'sq' }, { w: 2048, h: 2048, g: 'sq' },
+  { w: 768, h: 1024, g: 'pt' }, { w: 1152, h: 1536, g: 'pt' }, { w: 1536, h: 2048, g: 'pt' }
+];
+const maxLayersFor = (w, h) => { const px = w * h; return px >= 4e6 ? 3 : px >= 3e6 ? 4 : 5; };
+
+const doc = { w: 1024, h: 1024, layers: [], nextId: 1, scale: 1, tx: 0, ty: 0, fitScale: 1, touched: false };
+let activeLayer = null;
+let strokeBuf = null;
+
+const brushes = {
+  pencil: { size: 14, min: 0.2, opacity: 1 },
+  eraser: { size: 48, min: 0.35, opacity: 1 },
+  dotpen: { size: 3, min: 1, opacity: 1 },
+  doterase: { size: 6, min: 1, opacity: 1 }
+};
+/* aa: 縁のなめらかさ(アンチエイリアス)。pressOp: 筆圧で濃さを変えるか */
+const DEFS = {
+  pencil: { label: '鉛筆', erase: false, aa: true, pressOp: true },
+  eraser: { label: '消しゴム', erase: true, aa: true, pressOp: true },
+  dotpen: { label: 'ドット鉛筆', erase: false, aa: false, pressOp: true },
+  doterase: { label: 'ドット消しゴム', erase: true, aa: false, pressOp: true }
+};
+let tool = 'pencil';
+let hsv = { h: 222, s: 0.25, v: 0.2 };
+let rgb = [0, 0, 0];
+let sens = 75;
+let frozen = false;
+const pvEl = $('#pv');
+
+/* ---------- toast ---------- */
+let toastTimer = 0;
+function toast(msg, ms = 1100) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+/* ---------- history ---------- */
+const hist = { undo: [], redo: [] };
+const HIST_LIMIT = 5;
+function pushHistory(e) {
+  hist.undo.push(e); if (hist.undo.length > HIST_LIMIT) hist.undo.shift();
+  hist.redo.length = 0; doc.touched = true; updateButtons(); scheduleSave();
+}
+function undo() {
+  if (stroke) return;
+  const e = hist.undo.pop(); if (!e) { toast('これ以上戻れません'); return; }
+  e.undo(); hist.redo.push(e); updateButtons(); scheduleSave(); toast('元に戻しました');
+}
+function redo() {
+  if (stroke) return;
+  const e = hist.redo.pop(); if (!e) { toast('やり直せる操作がありません'); return; }
+  e.redo(); hist.undo.push(e); updateButtons(); scheduleSave(); toast('やり直しました');
+}
+function regionEntry(layer, x, y, w, h, data) {
+  const swap = () => {
+    const cur = layer.ctx.getImageData(x, y, w, h);
+    layer.ctx.putImageData(new ImageData(data, w, h), x, y);
+    data = cur.data; layer.dirty = true; drawThumb(layer);
+  };
+  return { undo: swap, redo: swap };
+}
+
+/* ---------- layers ---------- */
+function makeLayer(name) {
+  const c = document.createElement('canvas'); c.width = doc.w; c.height = doc.h; c.className = 'layer';
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  const k = Math.min(40 / doc.w, 32 / doc.h), tw = Math.max(1, Math.round(doc.w * k)), th = Math.max(1, Math.round(doc.h * k));
+  const t = document.createElement('canvas'); t.width = tw * 2; t.height = th * 2; t.className = 'th'; t.style.width = tw + 'px'; t.style.height = th + 'px';
+  return { canvas: c, ctx, thumb: t, visible: true, alphaLock: false, name: name || ('レイヤー ' + (doc.nextId++)), uid: newUid(), dirty: true };
+}
+let uidc = 0;
+const newUid = () => Date.now().toString(36) + (uidc++).toString(36) + Math.random().toString(36).slice(2, 5);
+function drawThumb(L) {
+  const x = L.thumb.getContext('2d'); x.clearRect(0, 0, L.thumb.width, L.thumb.height);
+  x.drawImage(L.canvas, 0, 0, L.thumb.width, L.thumb.height);
+}
+function syncBoard() {
+  doc.layers.forEach(L => { board.appendChild(L.canvas); L.canvas.style.display = L.visible ? '' : 'none'; });
+}
+function insertLayer(L, idx) { doc.layers.splice(idx, 0, L); L.dirty = true; syncBoard(); drawThumb(L); renderLayers(); }
+function removeLayer(L) {
+  const idx = doc.layers.indexOf(L); if (idx < 0) return;
+  doc.layers.splice(idx, 1); L.canvas.remove();
+  if (activeLayer === L) activeLayer = doc.layers[Math.min(idx, doc.layers.length - 1)];
+  renderLayers();
+}
+function setActive(L) { activeLayer = L; renderLayers(); scheduleSave(); }
+function layerMax() { return maxLayersFor(doc.w, doc.h); }
+
+function addLayer() {
+  if (doc.layers.length >= layerMax()) { toast('このサイズは' + layerMax() + '枚までです'); return; }
+  const L = makeLayer(), idx = doc.layers.indexOf(activeLayer) + 1;
+  insertLayer(L, idx); setActive(L);
+  pushHistory({ undo: () => removeLayer(L), redo: () => { insertLayer(L, idx); setActive(L); } });
+}
+function dupLayer() {
+  if (doc.layers.length >= layerMax()) { toast('このサイズは' + layerMax() + '枚までです'); return; }
+  const src = activeLayer, L = makeLayer(src.name + ' のコピー'), idx = doc.layers.indexOf(src) + 1;
+  L.ctx.drawImage(src.canvas, 0, 0);
+  insertLayer(L, idx); setActive(L);
+  pushHistory({ undo: () => removeLayer(L), redo: () => { insertLayer(L, idx); setActive(L); } });
+}
+function delLayer() {
+  if (doc.layers.length <= 1) { toast('最後の1枚は削除できません'); return; }
+  const L = activeLayer, idx = doc.layers.indexOf(L);
+  removeLayer(L);
+  pushHistory({ undo: () => { insertLayer(L, idx); setActive(L); }, redo: () => removeLayer(L) });
+}
+function mergeDown() {
+  const L = activeLayer, i = doc.layers.indexOf(L);
+  if (i <= 0) { toast('いちばん下のレイヤーは結合できません'); return; }
+  const B = doc.layers[i - 1];
+  if (!L.visible || !B.visible) { toast('非表示のレイヤーは結合できません'); return; }
+  const before = B.ctx.getImageData(0, 0, doc.w, doc.h);
+  B.ctx.drawImage(L.canvas, 0, 0); B.dirty = true; drawThumb(B);
+  removeLayer(L); setActive(B);
+  pushHistory({
+    undo: () => { B.ctx.putImageData(before, 0, 0); B.dirty = true; drawThumb(B); insertLayer(L, i); setActive(L); },
+    redo: () => { B.ctx.drawImage(L.canvas, 0, 0); B.dirty = true; drawThumb(B); removeLayer(L); setActive(B); }
+  });
+  toast('「' + B.name + '」に結合しました');
+}
+function moveLayer(L, to) {
+  const i = doc.layers.indexOf(L); if (i < 0) return;
+  doc.layers.splice(i, 1); doc.layers.splice(to, 0, L); syncBoard(); renderLayers(); scheduleSave();
+}
+function reorderLayer(L, from, to) {
+  moveLayer(L, to);
+  pushHistory({ undo: () => moveLayer(L, from), redo: () => moveLayer(L, to) });
+}
+function startReorder(e, L, row, handle) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  e.preventDefault(); e.stopPropagation();
+  const rows = $$('.lrow', llist), n = rows.length, src = rows.indexOf(row), from = n - 1 - src;
+  let to = from;
+  row.classList.add('drag');
+  try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+  const mv = ev => {
+    let pos = rows.findIndex(r => ev.clientY < r.getBoundingClientRect().bottom); if (pos < 0) pos = n - 1;
+    to = n - 1 - pos;
+    rows.forEach(r => r.classList.remove('dl-top', 'dl-bot'));
+    if (to !== from) rows[pos].classList.add(pos < src ? 'dl-top' : 'dl-bot');
+  };
+  const up = ev => {
+    handle.removeEventListener('pointermove', mv); handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', up);
+    rows.forEach(r => r.classList.remove('drag', 'dl-top', 'dl-bot'));
+    if (ev.type === 'pointerup' && to !== from) reorderLayer(L, from, to);
+  };
+  handle.addEventListener('pointermove', mv); handle.addEventListener('pointerup', up); handle.addEventListener('pointercancel', up);
+}
+function toggleLock() {
+  activeLayer.alphaLock = !activeLayer.alphaLock; renderLayers(); scheduleSave();
+  toast(activeLayer.alphaLock ? 'アルファロック: オン' : 'アルファロック: オフ');
+}
+
+const llist = $('#llist');
+function renderLayers() {
+  llist.innerHTML = '';
+  for (let i = doc.layers.length - 1; i >= 0; i--) {
+    const L = doc.layers[i];
+    const row = document.createElement('div');
+    row.className = 'lrow' + (L === activeLayer ? ' sel' : '') + (L.visible ? '' : ' hid');
+    const eye = document.createElement('button');
+    eye.className = 'eye'; eye.setAttribute('aria-label', L.visible ? 'レイヤーを隠す' : 'レイヤーを表示');
+    eye.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + (L.visible ? EYE_ON : EYE_OFF) + '</svg>';
+    eye.addEventListener('click', ev => { ev.stopPropagation(); L.visible = !L.visible; syncBoard(); renderLayers(); scheduleSave(); });
+    const name = document.createElement('span'); name.className = 'lname'; name.textContent = L.name;
+    row.append(eye, L.thumb, name);
+    if (L.alphaLock) {
+      const lk = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      lk.setAttribute('viewBox', '0 0 24 24'); lk.setAttribute('class', 'lock');
+      lk.innerHTML = '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16M12 4v16"/>';
+      row.appendChild(lk);
+    }
+    const gr = document.createElement('button');
+    gr.className = 'lgrip'; gr.setAttribute('aria-label', 'ドラッグで並び替え'); gr.title = 'ドラッグで並び替え';
+    gr.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h14"/></svg>';
+    gr.addEventListener('pointerdown', ev => startReorder(ev, L, row, gr));
+    gr.addEventListener('click', ev => ev.stopPropagation());
+    row.appendChild(gr);
+    row.addEventListener('click', () => setActive(L));
+    llist.appendChild(row);
+  }
+  const mx = layerMax();
+  if (!frozen) llist.style.height = (mx * 40 + (mx - 1) * 4) + 'px';
+  $('#lcount').textContent = doc.layers.length + ' / ' + mx;
+  updateButtons();
+}
+function updateButtons() {
+  $('#b-undo').disabled = !hist.undo.length;
+  $('#b-redo').disabled = !hist.redo.length;
+  const mx = layerMax();
+  $('#l-add').disabled = doc.layers.length >= mx;
+  $('#l-dup').disabled = doc.layers.length >= mx;
+  $('#l-del').disabled = doc.layers.length <= 1;
+  $('#l-merge').disabled = !activeLayer || doc.layers.indexOf(activeLayer) <= 0;
+  $('#l-lock').classList.toggle('on', !!(activeLayer && activeLayer.alphaLock));
+  $('#l-lock').setAttribute('aria-pressed', String(!!(activeLayer && activeLayer.alphaLock)));
+}
+
+/* ---------- document ---------- */
+function resetDoc(w, h) {
+  clearTimeout(holdTimer); pick = null; loupe.hidden = true;
+  stroke = null; penDown = false; touches.clear(); gest = null;
+  doc.layers.forEach(L => L.canvas.remove());
+  doc.layers = []; doc.w = w; doc.h = h; doc.nextId = 1; doc.touched = false; doc.id = null;
+  board.style.width = w + 'px'; board.style.height = h + 'px';
+  strokeBuf = new Uint8Array(w * h);
+  hist.undo.length = 0; hist.redo.length = 0;
+}
+function newDocument(w, h) {
+  resetDoc(w, h);
+  const L = makeLayer(); activeLayer = L; insertLayer(L, 0);
+  fitView(); layoutWindowsIfNeeded();
+}
+
+/* ---------- view ---------- */
+function applyView() {
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  doc.scale = clamp(doc.scale, doc.fitScale * 0.3, 16);
+  doc.tx = clamp(doc.tx, 100 - doc.w * doc.scale, sw - 100);
+  doc.ty = clamp(doc.ty, 100 - doc.h * doc.scale, sh - 100);
+  board.style.transform = 'translate(' + doc.tx + 'px,' + doc.ty + 'px) scale(' + doc.scale + ')';
+  /* 1ドットが画面の1画素以上に広がるときは補間せずくっきり表示する(iPadは高精細なので、倍率×画素比で判定) */
+  board.classList.toggle('px', doc.scale * (window.devicePixelRatio || 1) >= 1);
+}
+function fitView() {
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  const reserve = sw > 720 ? 248 : 0, pad = 20;
+  const aw = Math.max(80, sw - reserve - pad * 2), ah = Math.max(80, sh - pad * 2);
+  const s = Math.min(aw / doc.w, ah / doc.h, 4);
+  doc.fitScale = s; doc.scale = s;
+  doc.tx = reserve + pad + (aw - doc.w * s) / 2;
+  doc.ty = pad + (ah - doc.h * s) / 2;
+  applyView();
+}
+function zoomAt(mx, my, ns) {
+  const px = (mx - doc.tx) / doc.scale, py = (my - doc.ty) / doc.scale;
+  doc.scale = clamp(ns, doc.fitScale * 0.3, 16);
+  doc.tx = mx - px * doc.scale; doc.ty = my - py * doc.scale; applyView();
+}
+function toDoc(e, r) {
+  return { x: (e.clientX - r.left - doc.tx) / doc.scale, y: (e.clientY - r.top - doc.ty) / doc.scale };
+}
+
+/* ---------- drawing ---------- */
+let stroke = null, penDown = false;
+let pick = null, holdTimer = 0;
+const sizeOf = b => b.size;
+function pressureOf(ev) {
+  if (ev.pointerType === 'mouse') return 1;
+  let p = ev.pressure; if (!(p > 0)) p = 0.5;
+  return Math.min(1, p);
+}
+function diameter(b, p) { return Math.max(0.5, sizeOf(b) * (b.min + (1 - b.min) * p)); }
+
+function dab(cx, cy, r, a, aa) {
+  if (!aa) {
+    /* ドット用: 直径を整数に丸め、奇数なら画素の中心、偶数なら画素の角に置く。
+       1px=点、2px=2x2、3px=3x3、4px=角の欠けた4x4…と、きれいなドットの形になる */
+    const n = Math.max(1, Math.round(r * 2)); r = n / 2;
+    if (n % 2) { cx = Math.floor(cx) + 0.5; cy = Math.floor(cy) + 0.5; } else { cx = Math.round(cx); cy = Math.round(cy); }
+  }
+  const s = stroke, W = doc.w, H = doc.h, buf = s.buf, rr = r + 1;
+  const x0 = Math.max(0, Math.floor(cx - rr)), x1 = Math.min(W - 1, Math.ceil(cx + rr));
+  const y0 = Math.max(0, Math.floor(cy - rr)), y1 = Math.min(H - 1, Math.ceil(cy + rr));
+  if (x0 > x1 || y0 > y1) return;
+  let hit = false;
+  for (let y = y0; y <= y1; y++) {
+    const dy = y + 0.5 - cy;
+    for (let x = x0; x <= x1; x++) {
+      const dx = x + 0.5 - cx, dd = Math.sqrt(dx * dx + dy * dy);
+      let cov;
+      if (aa) { cov = r + 0.5 - dd; if (cov <= 0) continue; if (cov > 1) cov = 1; }
+      else { if (dd > r + 0.001) continue; cov = 1; }
+      const v = Math.round(a * cov), i = y * W + x;
+      if (v > buf[i]) { buf[i] = v; hit = true; }
+    }
+  }
+  if (!hit) return;
+  s.dirty = true;
+  const u = (o) => { if (!o) return { x0, y0, x1, y1 }; o.x0 = Math.min(o.x0, x0); o.y0 = Math.min(o.y0, y0); o.x1 = Math.max(o.x1, x1); o.y1 = Math.max(o.y1, y1); return o; };
+  s.fr = u(s.fr); s.bb = u(s.bb);
+}
+function stamp(x, y, p) {
+  const s = stroke, b = s.b, pe = Math.min(1, p / s.full), d = diameter(b, pe);
+  const a = b.opacity * (b.pressOp ? 0.1 + 0.9 * pe : 1) * 255;
+  dab(x, y, d / 2, a, b.aa);
+  return Math.max(0.5, d * 0.07);
+}
+function strokeTo(x, y, p) {
+  const s = stroke, dx = x - s.lx, dy = y - s.ly, L = Math.hypot(dx, dy);
+  if (L === 0) { s.lp = p; return; }
+  let t = s.carry;
+  while (t <= L) {
+    const k = t / L;
+    t += stamp(s.lx + dx * k, s.ly + dy * k, s.lp + (p - s.lp) * k);
+  }
+  s.carry = t - L; s.lx = x; s.ly = y; s.lp = p;
+}
+function flush() {
+  const s = stroke; if (!s || !s.fr) return;
+  const r = s.fr; s.fr = null;
+  const x0 = r.x0, y0 = r.y0, w = r.x1 - r.x0 + 1, h = r.y1 - r.y0 + 1, W = doc.w;
+  const out = s.ctx.createImageData(w, h), od = out.data, bd = s.before.data, buf = s.buf;
+  const cr = s.color[0], cg = s.color[1], cb = s.color[2], erase = s.erase, lock = s.lock;
+  for (let y = 0; y < h; y++) {
+    let bi = (y0 + y) * W + x0, oi = y * w * 4;
+    for (let x = 0; x < w; x++, bi++, oi += 4) {
+      const p = bi * 4, a = buf[bi];
+      const r0 = bd[p], g0 = bd[p + 1], b0 = bd[p + 2], a0 = bd[p + 3];
+      if (a === 0 || (erase && lock)) { od[oi] = r0; od[oi + 1] = g0; od[oi + 2] = b0; od[oi + 3] = a0; continue; }
+      const sa = a / 255;
+      if (erase) {
+        od[oi] = r0; od[oi + 1] = g0; od[oi + 2] = b0; od[oi + 3] = a0 * (1 - sa);
+      } else if (lock) {
+        od[oi + 3] = a0;
+        if (a0 === 0) { od[oi] = r0; od[oi + 1] = g0; od[oi + 2] = b0; }
+        else { od[oi] = r0 + (cr - r0) * sa; od[oi + 1] = g0 + (cg - g0) * sa; od[oi + 2] = b0 + (cb - b0) * sa; }
+      } else {
+        const ab = a0 / 255, ao = sa + ab * (1 - sa), k = ab * (1 - sa);
+        od[oi] = (cr * sa + r0 * k) / ao; od[oi + 1] = (cg * sa + g0 * k) / ao; od[oi + 2] = (cb * sa + b0 * k) / ao;
+        od[oi + 3] = ao * 255;
+      }
+    }
+  }
+  s.ctx.putImageData(out, x0, y0);
+}
+function beginStroke(e) {
+  const L = activeLayer;
+  if (!L.visible) { toast('非表示のレイヤーには描けません'); return; }
+  penDown = true; touches.clear(); gest = null;
+  const b = brushes[tool];
+  const before = L.ctx.getImageData(0, 0, doc.w, doc.h);
+  stroke = { pid: e.pointerId, layer: L, ctx: L.ctx, before, buf: strokeBuf, color: rgb.slice(), erase: DEFS[tool].erase, lock: L.alphaLock,
+    b: { size: b.size, min: b.min, opacity: b.opacity, aa: DEFS[tool].aa, pressOp: DEFS[tool].pressOp }, full: 1.05 - 0.8 * sens / 100, bb: null, fr: null, dirty: false, lx: 0, ly: 0, lp: 0, carry: 0, rect: stage.getBoundingClientRect() };
+  try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+  const pt = toDoc(e, stroke.rect), p = pressureOf(e);
+  pvEl.textContent = '筆圧 ' + p.toFixed(2);
+  stroke.lx = pt.x; stroke.ly = pt.y; stroke.lp = p;
+  stroke.sx = e.clientX; stroke.sy = e.clientY; stroke.moved = false;
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(() => { if (stroke && !stroke.moved) startPick(stroke.pid, stroke.sx, stroke.sy); }, HOLD_MS);
+  stroke.carry = stamp(pt.x, pt.y, p);
+  flush();
+}
+function addPoint(ev) {
+  const s = stroke, pt = toDoc(ev, s.rect);
+  if (!s.moved && Math.hypot(ev.clientX - s.sx, ev.clientY - s.sy) > 6) { s.moved = true; clearTimeout(holdTimer); }
+  const raw = pressureOf(ev);
+  pvEl.textContent = '筆圧 ' + raw.toFixed(2);
+  const p = s.lp + (raw - s.lp) * 0.55;
+  strokeTo(pt.x, pt.y, p);
+}
+function endStroke() {
+  const s = stroke; if (!s) return;
+  clearTimeout(holdTimer);
+  flush(); stroke = null; penDown = false;
+  if (!s.dirty || !s.bb) return;
+  const { x0, y0, x1, y1 } = s.bb, w = x1 - x0 + 1, h = y1 - y0 + 1, W = doc.w;
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const src = ((y0 + y) * W + x0) * 4;
+    data.set(s.before.data.subarray(src, src + w * 4), y * w * 4);
+  }
+  for (let y = y0; y <= y1; y++) s.buf.fill(0, y * W + x0, y * W + x1 + 1);
+  s.layer.dirty = true; drawThumb(s.layer);
+  pushHistory(regionEntry(s.layer, x0, y0, w, h, data));
+}
+
+/* ---------- eyedropper: 動かさず長押しで色を拾う(Pencil・指どちらでも) ---------- */
+const HOLD_MS = 450;
+const loupe = document.createElement('div'); loupe.id = 'loupe'; loupe.hidden = true; document.body.appendChild(loupe);
+function cancelStroke() {
+  const s = stroke; if (!s) return;
+  clearTimeout(holdTimer);
+  if (s.dirty && s.bb) {
+    const { x0, y0, x1, y1 } = s.bb, W = doc.w;
+    s.ctx.putImageData(s.before, 0, 0, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+    for (let y = y0; y <= y1; y++) s.buf.fill(0, y * W + x0, y * W + x1 + 1);
+  }
+  stroke = null;
+}
+function startPick(pid, cx, cy) { cancelStroke(); pick = { pid }; pickAt(cx, cy); }
+function sampleColor(x, y) {
+  let r = 255, g = 255, b = 255;
+  doc.layers.forEach(L => {
+    if (!L.visible) return;
+    const d = L.ctx.getImageData(x, y, 1, 1).data, a = d[3] / 255;
+    if (!a) return;
+    r = d[0] * a + r * (1 - a); g = d[1] * a + g * (1 - a); b = d[2] * a + b * (1 - a);
+  });
+  return [Math.round(r), Math.round(g), Math.round(b)];
+}
+function pickAt(cx, cy) {
+  const r = stage.getBoundingClientRect();
+  const x = Math.floor((cx - r.left - doc.tx) / doc.scale), y = Math.floor((cy - r.top - doc.ty) / doc.scale);
+  if (x >= 0 && y >= 0 && x < doc.w && y < doc.h) {
+    const c = sampleColor(x, y); hsv = rgb2hsv(c[0], c[1], c[2]); updateColor();
+    loupe.style.background = 'rgb(' + c.join(',') + ')';
+  }
+  loupe.hidden = false;
+  loupe.style.left = clamp(cx - 80, 4, innerWidth - 60) + 'px'; loupe.style.top = clamp(cy - 80, 4, innerHeight - 60) + 'px';
+}
+function endPick() { pick = null; penDown = false; loupe.hidden = true; toast('スポイト ' + $('#hex').textContent); }
+
+/* ---------- pointer routing ---------- */
+const touches = new Map();
+let gest = null;
+function baseline() {
+  const p = [...touches.values()]; if (p.length < 2 || !gest) return;
+  const r = stage.getBoundingClientRect(), a = p[0], b = p[1];
+  gest.mx = (a.x + b.x) / 2 - r.left; gest.my = (a.y + b.y) / 2 - r.top;
+  gest.d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+  gest.s = doc.scale; gest.tx = doc.tx; gest.ty = doc.ty;
+}
+stage.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch') {
+    if (penDown || stroke || pick) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+    if (!gest) gest = { t0: performance.now(), max: 0, moved: false, start: new Map() };
+    gest.start.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    gest.max = Math.max(gest.max, touches.size);
+    clearTimeout(holdTimer);
+    if (touches.size === 1) {
+      const id = e.pointerId, hx = e.clientX, hy = e.clientY;
+      holdTimer = setTimeout(() => {
+        if (touches.size === 1 && touches.has(id) && gest && !gest.moved) { touches.clear(); gest = null; startPick(id, hx, hy); }
+      }, HOLD_MS);
+    }
+    baseline(); return;
+  }
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  e.preventDefault(); beginStroke(e);
+});
+stage.addEventListener('pointermove', e => {
+  if (pick && e.pointerId === pick.pid) { pickAt(e.clientX, e.clientY); return; }
+  if (touches.has(e.pointerId)) {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!gest) return;
+    const st = gest.start.get(e.pointerId);
+    if (st && Math.hypot(e.clientX - st.x, e.clientY - st.y) > 10) gest.moved = true;
+    if (touches.size === 2 && gest.moved) {
+      const p = [...touches.values()], a = p[0], b = p[1], r = stage.getBoundingClientRect();
+      const mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top, d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      const ns = clamp(gest.s * d / gest.d, doc.fitScale * 0.3, 16);
+      const px = (gest.mx - gest.tx) / gest.s, py = (gest.my - gest.ty) / gest.s;
+      doc.scale = ns; doc.tx = mx - px * ns; doc.ty = my - py * ns; applyView();
+    }
+    return;
+  }
+  if (stroke && e.pointerId === stroke.pid) {
+    const list = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    if (list.length) list.forEach(addPoint); else addPoint(e);
+    flush();
+  }
+});
+function onUp(e) {
+  if (pick && e.pointerId === pick.pid) { endPick(); return; }
+  if (touches.has(e.pointerId)) {
+    touches.delete(e.pointerId);
+    if (touches.size === 0 && gest) {
+      const quick = performance.now() - gest.t0 < 450;
+      if (e.type === 'pointerup' && !gest.moved && quick) {
+        if (gest.max === 2) undo(); else if (gest.max === 3) redo();
+      }
+      gest = null;
+    } else baseline();
+    return;
+  }
+  if (stroke && e.pointerId === stroke.pid) endStroke();
+}
+stage.addEventListener('pointerup', onUp);
+stage.addEventListener('pointercancel', onUp);
+stage.addEventListener('contextmenu', e => e.preventDefault());
+stage.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = stage.getBoundingClientRect();
+  zoomAt(e.clientX - r.left, e.clientY - r.top, doc.scale * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
+}, { passive: false });
+['gesturestart', 'gesturechange', 'gestureend'].forEach(n => document.addEventListener(n, e => e.preventDefault()));
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+});
+
+/* ---------- floating windows ---------- */
+let zTop = 10;
+const wins = $$('.win');
+function place(w, x, y) {
+  const W = ui.clientWidth, H = ui.clientHeight;
+  w.style.left = clamp(x, 0, Math.max(0, W - w.offsetWidth)) + 'px';
+  w.style.top = clamp(y, 0, Math.max(0, H - w.offsetHeight)) + 'px';
+}
+wins.forEach(w => {
+  const h = $('.wh, .grip', w);
+  w.addEventListener('pointerdown', () => { w.style.zIndex = ++zTop; });
+  h.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.target.closest('button')) return;
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY, ox = w.offsetLeft, oy = w.offsetTop;
+    try { h.setPointerCapture(e.pointerId); } catch (_) {}
+    const mv = ev => place(w, ox + ev.clientX - sx, oy + ev.clientY - sy);
+    const up = () => { h.removeEventListener('pointermove', mv); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up); };
+    h.addEventListener('pointermove', mv); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
+  });
+});
+let laidOut = false;
+function layoutWindows() {
+  const H = ui.clientHeight; let x = 8, y = 8, colW = 0;
+  ['w-tool', 'w-color', 'w-brush', 'w-layer'].forEach(id => {
+    const w = $('#' + id), hgt = w.offsetHeight, wd = w.offsetWidth;
+    if (y + hgt > H - 8 && y > 8) { x += colW + 8; y = 8; colW = 0; }
+    w.style.left = x + 'px'; w.style.top = y + 'px';
+    y += hgt + 8; colW = Math.max(colW, wd);
+  });
+  laidOut = true;
+}
+function layoutWindowsIfNeeded() { if (!laidOut) layoutWindows(); }
+function keepWindowsInside() { wins.forEach(w => place(w, w.offsetLeft, w.offsetTop)); }
+window.addEventListener('resize', () => { keepWindowsInside(); applyView(); });
+
+/* ---------- color ---------- */
+function hsv2rgb(h, s, v) {
+  const f = n => { const k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); };
+  return [f(5), f(3), f(1)].map(x => Math.round(x * 255));
+}
+function rgb2hsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; let h = 0;
+  if (d) { if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4; h *= 60; if (h < 0) h += 360; }
+  return { h, s: mx ? d / mx : 0, v: mx };
+}
+const ring = $('#ring'), sv = $('#sv'), svk = $('#svk'), hk = $('#hk');
+function updateColor() {
+  rgb = hsv2rgb(hsv.h, hsv.s, hsv.v);
+  const hex = '#' + rgb.map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase();
+  $('#hex').textContent = hex; $('#sw').style.background = hex;
+  sv.style.setProperty('--hue', 'hsl(' + hsv.h + ' 100% 50%)');
+  const Wd = ring.clientWidth || 164, R = Wd * 0.445, a = hsv.h * Math.PI / 180, c = Wd / 2, S = Wd * 0.524;
+  hk.style.left = (c + R * Math.sin(a)) + 'px'; hk.style.top = (c - R * Math.cos(a)) + 'px';
+  hk.style.background = 'hsl(' + hsv.h + ' 100% 50%)'; svk.style.background = hex;
+  svk.style.left = (c + (hsv.s - 0.5) * S) + 'px';
+  svk.style.top = (c + (0.5 - hsv.v) * S) + 'px';
+  drawPreviews();
+}
+let colorDrag = null;
+function colorFrom(e) {
+  const r = ring.getBoundingClientRect();
+  if (colorDrag === 'hue') {
+    const dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    hsv.h = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
+  } else {
+    const q = sv.getBoundingClientRect();
+    hsv.s = clamp((e.clientX - q.left) / q.width, 0, 1); hsv.v = 1 - clamp((e.clientY - q.top) / q.height, 0, 1);
+  }
+  updateColor();
+}
+ring.addEventListener('pointerdown', e => {
+  const r = ring.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+  const d = Math.hypot(dx, dy), R = r.width / 2, q = sv.getBoundingClientRect();
+  if (d > R * 0.74 && d <= R + 6) colorDrag = 'hue';
+  else if (e.clientX >= q.left - 4 && e.clientX <= q.right + 4 && e.clientY >= q.top - 4 && e.clientY <= q.bottom + 4) colorDrag = 'sv';
+  else return;
+  e.preventDefault(); try { ring.setPointerCapture(e.pointerId); } catch (_) {}
+  colorFrom(e);
+});
+ring.addEventListener('pointermove', e => { if (colorDrag) colorFrom(e); });
+const endColor = () => { colorDrag = null; };
+ring.addEventListener('pointerup', endColor); ring.addEventListener('pointercancel', endColor);
+
+/* ---------- brush panel ---------- */
+const brows = $('#brows'), prevCanvas = {}, browEls = {};
+brows.innerHTML = '';
+Object.keys(DEFS).forEach(key => {
+  const b = document.createElement('button');
+  b.className = 'brow' + (key === tool ? ' sel' : ''); b.dataset.tool = key; b.setAttribute('aria-label', DEFS[key].label);
+  const c = document.createElement('canvas'); c.width = 416; c.height = 64;
+  const sp = document.createElement('span'); sp.textContent = DEFS[key].label;
+  b.append(c, sp); prevCanvas[key] = c; browEls[key] = b;
+  b.addEventListener('click', () => {
+    tool = key; Object.keys(browEls).forEach(k => browEls[k].classList.toggle('sel', k === key)); syncSliders();
+  });
+  brows.appendChild(b);
+});
+const tmpC = document.createElement('canvas'); tmpC.width = 416; tmpC.height = 64;
+function drawPreview(key) {
+  const c = prevCanvas[key], x = c.getContext('2d'), W = c.width, H = c.height, b = brushes[key];
+  x.clearRect(0, 0, W, H);
+  const t = tmpC.getContext('2d'); t.clearRect(0, 0, W, H);
+  const maxD = (2 + 15 * Math.sqrt((b.size - 1) / 299)) * 2, minD = Math.max(1, maxD * b.min);
+  t.fillStyle = DEFS[key].erase ? '#585a5f' : 'rgb(' + rgb.join(',') + ')';
+  const N = 200;
+  for (let i = 0; i <= N; i++) {
+    const u = i / N, px = 30 + u * (W - 60), py = H / 2 + 4 + Math.sin(u * Math.PI * 2) * H * 0.2;
+    const p = Math.pow(Math.sin(Math.PI * u), 0.7), d = minD + (maxD - minD) * p;
+    t.beginPath(); t.arc(px, py, d / 2, 0, Math.PI * 2); t.fill();
+  }
+  if (!DEFS[key].aa) {
+    const id = t.getImageData(0, 0, W, H), q = id.data;
+    for (let i = 3; i < q.length; i += 4) q[i] = q[i] > 127 ? 255 : 0;
+    t.putImageData(id, 0, 0);
+  }
+  x.globalAlpha = b.opacity; x.drawImage(tmpC, 0, 0); x.globalAlpha = 1;
+}
+function drawPreviews() { Object.keys(DEFS).forEach(drawPreview); }
+const rSize = $('#r-size'), rMin = $('#r-min'), rOp = $('#r-op'), rSens = $('#r-sens');
+const sizeFromSlider = v => Math.round(1 + Math.pow(v / 1000, 2) * 299);
+const sliderFromSize = s => Math.round(Math.sqrt((s - 1) / 299) * 1000);
+function paintSlider(el) { el.style.setProperty('--p', ((el.value - el.min) / (el.max - el.min) * 100) + '%'); }
+function syncSliders() {
+  const b = brushes[tool];
+  rSize.value = sliderFromSize(b.size); rMin.value = Math.round(b.min * 100); rOp.value = Math.round(b.opacity * 100);
+  rSens.value = sens; $('#v-sens').textContent = sens;
+  [rSize, rMin, rOp, rSens].forEach(paintSlider);
+  $('#v-size').textContent = b.size + 'px'; $('#v-min').textContent = Math.round(b.min * 100) + '%'; $('#v-op').textContent = Math.round(b.opacity * 100) + '%';
+}
+rSize.addEventListener('input', () => { brushes[tool].size = sizeFromSlider(+rSize.value); syncSliders(); drawPreview(tool); });
+rMin.addEventListener('input', () => { brushes[tool].min = +rMin.value / 100; syncSliders(); drawPreview(tool); });
+rOp.addEventListener('input', () => { brushes[tool].opacity = +rOp.value / 100; syncSliders(); drawPreview(tool); });
+rSens.addEventListener('input', () => { sens = +rSens.value; syncSliders(); });
+
+/* 最小サイズ・筆圧感度スライダーの表示切り替え(窓の高さも一緒に増減) */
+const bAdv = $('#b-adv'), slidersEl = $('.sliders');
+function setAdvanced(show, adjust) {
+  const before = slidersEl.offsetHeight;
+  $$('.adv').forEach(el => { el.hidden = !show; });
+  bAdv.setAttribute('aria-pressed', String(show));
+  if (adjust) {
+    const w = $('#w-brush');
+    w.style.height = Math.max(0, w.offsetHeight + (slidersEl.offsetHeight - before)) + 'px';
+    place(w, w.offsetLeft, w.offsetTop);
+  }
+  try { localStorage.setItem('oekaki.adv', show ? '1' : '0'); } catch (_) {}
+}
+bAdv.addEventListener('click', () => setAdvanced(bAdv.getAttribute('aria-pressed') !== 'true', true));
+
+/* ウィンドウの大きさ変更(右下のつまみをドラッグ) */
+const MINS = {
+  'w-tool': () => [120, 0],
+  'w-color': () => [150, 26 + 110 + 16],
+  'w-brush': () => [180, 26 + 44 + slidersEl.offsetHeight],
+  'w-layer': () => [170, 26 + 5 * 34 + 4 * 6 + 12]
+};
+function sizeRing() {
+  const w = $('#w-color'), s = clamp(Math.min(w.clientWidth - 20, w.clientHeight - 26 - 16), 96, 420);
+  ring.style.width = ring.style.height = s + 'px'; updateColor();
+}
+wins.forEach(w => {
+  const g = document.createElement('div'); g.className = 'rz'; g.title = 'ドラッグで大きさを変更'; w.appendChild(g);
+  g.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation(); w.style.zIndex = ++zTop;
+    const sx = e.clientX, sy = e.clientY, sw = w.offsetWidth, sh = w.offsetHeight, mins = MINS[w.id]();
+    const maxW = Math.max(mins[0], ui.clientWidth - w.offsetLeft), maxH = Math.max(mins[1], ui.clientHeight - w.offsetTop);
+    try { g.setPointerCapture(e.pointerId); } catch (_) {}
+    const mv = ev => {
+      w.style.width = clamp(sw + ev.clientX - sx, mins[0], maxW) + 'px';
+      if (w.id !== 'w-tool') w.style.height = clamp(sh + ev.clientY - sy, mins[1], maxH) + 'px';
+      if (w.id === 'w-color') sizeRing();
+    };
+    const up = () => { g.removeEventListener('pointermove', mv); g.removeEventListener('pointerup', up); g.removeEventListener('pointercancel', up); };
+    g.addEventListener('pointermove', mv); g.addEventListener('pointerup', up); g.addEventListener('pointercancel', up);
+  });
+});
+function freezeSizes() {
+  ['w-color', 'w-brush', 'w-layer'].forEach(id => { const w = $('#' + id); w.style.height = w.offsetHeight + 'px'; });
+  llist.style.height = ''; frozen = true;
+}
+
+/* ---------- toolbar / dialogs ---------- */
+$('#b-fit').addEventListener('click', fitView);
+$('#b-undo').addEventListener('click', undo);
+$('#b-redo').addEventListener('click', redo);
+$('#l-add').addEventListener('click', addLayer);
+$('#l-del').addEventListener('click', delLayer);
+$('#l-dup').addEventListener('click', dupLayer);
+$('#l-lock').addEventListener('click', toggleLock);
+$('#l-merge').addEventListener('click', mergeDown);
+
+const modal = $('#modal');
+function showDialog(id) { modal.hidden = false; $('#dlg-works').hidden = id !== 'works'; $('#dlg-export').hidden = id !== 'export'; }
+function closeDialog() { modal.hidden = true; }
+SIZES.forEach(s => {
+  const b = document.createElement('button'); b.className = 'size';
+  const base = 26 + 40 * Math.max(s.w, s.h) / 2048, k = base / Math.max(s.w, s.h);
+  const n = maxLayersFor(s.w, s.h);
+  b.innerHTML = '<span class="box"><i style="width:' + Math.round(s.w * k) + 'px;height:' + Math.round(s.h * k) + 'px"></i></span><b>' + s.w + ' × ' + s.h + '</b><small>レイヤー ' + n + '枚まで</small>';
+  b.addEventListener('click', async () => { await flushSave(); newDocument(s.w, s.h); closeDialog(); toast(s.w + ' × ' + s.h + ' のキャンバスを作りました'); });
+  $(s.g === 'sq' ? '#sizes-sq' : '#sizes-pt').appendChild(b);
+});
+$('#b-works').addEventListener('click', () => { showDialog('works'); refreshWorks(); });
+$('#worksClose').addEventListener('click', closeDialog);
+
+/* ---------- 自動保存 (IndexedDB) ---------- */
+let dbP = null;
+function dbOpen() {
+  if (dbP) return dbP;
+  dbP = new Promise((res, rej) => {
+    try {
+      const r = indexedDB.open('oekaki', 1);
+      r.onupgradeneeded = () => { const d = r.result; d.createObjectStore('works', { keyPath: 'id' }); d.createObjectStore('layerdata', { keyPath: 'k' }); };
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('blocked'));
+    } catch (e) { rej(e); }
+  });
+  dbP.catch(() => { dbP = null; });
+  return dbP;
+}
+const rq = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+const txDone = t => new Promise((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('abort')); });
+async function dbAllWorks() { const d = await dbOpen(); return rq(d.transaction('works').objectStore('works').getAll()); }
+async function dbGetWork(id) { const d = await dbOpen(); return rq(d.transaction('works').objectStore('works').get(id)); }
+async function dbGetLayer(k) { const d = await dbOpen(); const r = await rq(d.transaction('layerdata').objectStore('layerdata').get(k)); return r && r.buf; }
+async function dbDeleteWork(id) {
+  const d = await dbOpen(), t = d.transaction(['works', 'layerdata'], 'readwrite');
+  t.objectStore('works').delete(id); t.objectStore('layerdata').delete(IDBKeyRange.bound(id + ':', id + ':￿'));
+  await txDone(t);
+}
+const newWorkId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const saveBtn = $('#b-works');
+let saveState = '', saveP = Promise.resolve(), saveT = 0, dbBroken = false, saveQueued = false;
+function setSaveState(s) { saveState = s; refreshDot(); }
+function refreshDot() {
+  saveBtn.dataset.s = saveState === 'err' ? 'err' : saveState === 'pending' ? 'pending' : backupDue() ? 'nag' : '';
+  saveBtn.title = saveState === 'err' ? '自動保存に失敗しています' : saveState === 'pending' ? '保存中…' : backupDue() ? 'バックアップがしばらく取られていません' : '作品・新規・バックアップ';
+}
+function scheduleSave() {
+  if (!doc.touched || dbBroken) return;
+  saveQueued = true; setSaveState('pending'); clearTimeout(saveT); saveT = setTimeout(saveNow, 1200);
+}
+const canvasBlob = c => new Promise(res => c.toBlob(res, 'image/png'));
+function makeThumb() {
+  const k = Math.min(160 / doc.w, 160 / doc.h), c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(doc.w * k)); c.height = Math.max(1, Math.round(doc.h * k));
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  x.imageSmoothingQuality = 'high';
+  doc.layers.forEach(L => { if (L.visible) x.drawImage(L.canvas, 0, 0, c.width, c.height); });
+  return c.toDataURL('image/jpeg', 0.7);
+}
+function saveNow() {
+  clearTimeout(saveT); saveQueued = false;
+  if (!doc.touched || dbBroken) return saveP;
+  if (!doc.id) doc.id = newWorkId();
+  const id = doc.id;
+  const meta = {
+    id, w: doc.w, h: doc.h, updated: Date.now(), thumb: makeThumb(), nextId: doc.nextId,
+    active: activeLayer ? activeLayer.uid : null,
+    layers: doc.layers.map(L => ({ uid: L.uid, name: L.name, visible: L.visible, alphaLock: L.alphaLock }))
+  };
+  const dirtyLs = doc.layers.filter(L => L.dirty);
+  const jobs = dirtyLs.map(L => { L.dirty = false; return canvasBlob(L.canvas).then(b => b.arrayBuffer()).then(buf => ({ k: id + ':' + L.uid, buf })); });
+  saveP = saveP.then(async () => {
+    try {
+      const rows = await Promise.all(jobs), d = await dbOpen();
+      const t = d.transaction(['works', 'layerdata'], 'readwrite'), ls = t.objectStore('layerdata');
+      rows.forEach(r => ls.put(r));
+      const keep = new Set(meta.layers.map(l => id + ':' + l.uid));
+      const cur = ls.openKeyCursor(IDBKeyRange.bound(id + ':', id + ':￿'));
+      cur.onsuccess = () => { const c = cur.result; if (c) { if (!keep.has(c.key)) ls.delete(c.key); c.continue(); } };
+      t.objectStore('works').put(meta);
+      await txDone(t);
+      if (!saveQueued) setSaveState('');
+    } catch (err) {
+      dirtyLs.forEach(L => { L.dirty = true; });
+      setSaveState('err');
+    }
+  });
+  return saveP;
+}
+function flushSave() { return saveNow(); }
+window.addEventListener('pagehide', () => { saveNow(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
+
+async function loadLayerInto(L, buf) {
+  const bmp = await createImageBitmap(new Blob([buf], { type: 'image/png' }));
+  L.ctx.drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
+}
+async function openWork(id) {
+  const m = await dbGetWork(id); if (!m) throw new Error('missing');
+  const bufs = await Promise.all(m.layers.map(l => dbGetLayer(id + ':' + l.uid)));
+  resetDoc(m.w, m.h);
+  doc.id = id; doc.nextId = m.nextId || m.layers.length + 1;
+  m.layers.forEach((l, i) => {
+    const L = makeLayer(l.name); L.uid = l.uid; L.visible = l.visible !== false; L.alphaLock = !!l.alphaLock; L.dirty = false;
+    doc.layers.push(L); loadQ.push(bufs[i] ? loadLayerInto(L, bufs[i]) : null);
+  });
+  await Promise.all(loadQ.splice(0));
+  activeLayer = doc.layers.find(L => L.uid === m.active) || doc.layers[doc.layers.length - 1];
+  syncBoard(); doc.layers.forEach(drawThumb); renderLayers();
+  doc.touched = true; fitView(); layoutWindowsIfNeeded();
+}
+const loadQ = [];
+
+/* ---------- 作品リスト ---------- */
+const fmtDate = t => { const d = new Date(t), z = n => String(n).padStart(2, '0'); return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); };
+async function refreshWorks() {
+  const box = $('#worksList'); box.innerHTML = '';
+  let ws = [];
+  try { ws = await dbAllWorks(); } catch (_) { box.innerHTML = '<div class="wk-empty">この環境では自動保存が使えません。書き出し(PNG/JPG)をご利用ください。</div>'; updateBackupStatus(0); return; }
+  ws.sort((a, b) => b.updated - a.updated);
+  if (!ws.length) box.innerHTML = '<div class="wk-empty">まだ保存された作品はありません。描き始めると自動で保存されます。</div>';
+  ws.forEach(m => {
+    const row = document.createElement('div'); row.className = 'wk' + (m.id === doc.id ? ' cur' : '');
+    const img = document.createElement('img'); img.src = m.thumb; img.alt = '';
+    const meta = document.createElement('div'); meta.className = 'meta';
+    meta.innerHTML = '<b>' + m.w + ' × ' + m.h + '</b><small>' + fmtDate(m.updated) + ' ・ レイヤー' + m.layers.length + '枚' + (m.id === doc.id ? ' ・ 編集中' : '') + '</small>';
+    const open = document.createElement('button'); open.className = 'btn'; open.textContent = m.id === doc.id ? '閉じる' : '開く';
+    open.addEventListener('click', async () => {
+      if (m.id === doc.id) { closeDialog(); return; }
+      open.disabled = true; open.textContent = '読込中…';
+      try { await flushSave(); await openWork(m.id); closeDialog(); toast('作品を開きました'); } catch (_) { open.disabled = false; open.textContent = '開く'; toast('開けませんでした'); }
+    });
+    const del = document.createElement('button'); del.className = 'btn danger'; del.textContent = '削除';
+    let armT = 0;
+    del.addEventListener('click', async () => {
+      if (!del.classList.contains('arm')) { del.classList.add('arm'); del.textContent = '本当に削除'; armT = setTimeout(() => { del.classList.remove('arm'); del.textContent = '削除'; }, 2500); return; }
+      clearTimeout(armT);
+      try {
+        const cur = m.id === doc.id; await saveP; await dbDeleteWork(m.id);
+        if (cur) { clearTimeout(saveT); newDocument(doc.w, doc.h); setSaveState(''); }
+        toast('削除しました'); refreshWorks();
+      } catch (_) { toast('削除できませんでした'); }
+    });
+    row.append(img, meta, open, del); box.appendChild(row);
+  });
+  updateBackupStatus(ws.length);
+}
+
+/* ---------- バックアップ (.zip) ---------- */
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = -1; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ -1) >>> 0; }
+function zipBuild(files) {
+  const enc = new TextEncoder(), parts = [], cds = []; let off = 0;
+  const d = new Date(), dt = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(), tm = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  files.forEach(f => {
+    const nm = enc.encode(f.name), crc = crc32(f.data), sz = f.data.length;
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+    lh.setUint16(10, tm, true); lh.setUint16(12, dt, true); lh.setUint32(14, crc, true); lh.setUint32(18, sz, true); lh.setUint32(22, sz, true);
+    lh.setUint16(26, nm.length, true); lh.setUint16(28, 0, true);
+    parts.push(new Uint8Array(lh.buffer), nm, f.data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true);
+    ch.setUint16(12, tm, true); ch.setUint16(14, dt, true); ch.setUint32(16, crc, true); ch.setUint32(20, sz, true); ch.setUint32(24, sz, true);
+    ch.setUint16(28, nm.length, true); ch.setUint32(42, off, true);
+    cds.push(new Uint8Array(ch.buffer), nm);
+    off += 30 + nm.length + sz;
+  });
+  const cdSize = cds.reduce((a, p) => a + p.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, cdSize, true); end.setUint32(16, off, true);
+  return new Blob([...parts, ...cds, new Uint8Array(end.buffer)], { type: 'application/zip' });
+}
+function zipRead(buf) {
+  const v = new DataView(buf), u8 = new Uint8Array(buf), dec = new TextDecoder(), ents = {};
+  let e = buf.byteLength - 22; while (e >= 0 && v.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error('not zip');
+  const n = v.getUint16(e + 10, true); let p = v.getUint32(e + 16, true);
+  for (let i = 0; i < n; i++) {
+    if (v.getUint32(p, true) !== 0x02014b50) throw new Error('bad zip');
+    const method = v.getUint16(p + 10, true), csz = v.getUint32(p + 20, true), nl = v.getUint16(p + 28, true), xl = v.getUint16(p + 30, true), cl = v.getUint16(p + 32, true), lo = v.getUint32(p + 42, true);
+    const name = dec.decode(u8.subarray(p + 46, p + 46 + nl));
+    ents[name] = { method, csz, lo }; p += 46 + nl + xl + cl;
+  }
+  const get = async name => {
+    const en = ents[name]; if (!en) return null;
+    const s = en.lo + 30 + v.getUint16(en.lo + 26, true) + v.getUint16(en.lo + 28, true), raw = u8.subarray(s, s + en.csz);
+    if (en.method === 0) return raw;
+    if (en.method === 8 && window.DecompressionStream) {
+      const ds = new DecompressionStream('deflate-raw'); const w = ds.writable.getWriter(); w.write(raw); w.close();
+      return new Uint8Array(await new Response(ds.readable).arrayBuffer());
+    }
+    throw new Error('unsupported');
+  };
+  return { names: Object.keys(ents), get };
+}
+const BK_KEY = 'oekaki.lastBackup';
+const lastBackup = () => { try { return +localStorage.getItem(BK_KEY) || 0; } catch (_) { return 0; } };
+let hasWorks = false;
+function backupDue() { return hasWorks && Date.now() - lastBackup() > 7 * 864e5; }
+function updateBackupStatus(n) {
+  hasWorks = n > 0; const el = $('#bkStatus'), lb = lastBackup();
+  const days = lb ? Math.floor((Date.now() - lb) / 864e5) : -1;
+  el.className = backupDue() ? 'warn' : '';
+  el.textContent = !lb ? (n ? 'まだバックアップを取っていません。ブラウザの都合で保存データが消えることがあるため、ときどき書き出してファイルAppに置いておくと安心です。' : 'バックアップは、作品ができてから取れます。')
+    : (days === 0 ? '最後のバックアップ: 今日' : '最後のバックアップ: ' + days + '日前') + (backupDue() ? '(そろそろ取り直しをおすすめします)' : '');
+  refreshDot();
+}
+async function exportBackup() {
+  const st = $('#bkStatus'); st.className = ''; st.textContent = 'バックアップを作成中…';
+  try {
+    await flushSave();
+    const ws = await dbAllWorks(); if (!ws.length) { st.textContent = '保存された作品がありません。'; return; }
+    const enc = new TextEncoder(), files = [{ name: 'oekaki-backup.json', data: enc.encode(JSON.stringify({ v: 1, created: Date.now(), works: ws.map(w => w.id) })) }];
+    for (const m of ws) {
+      files.push({ name: m.id + '/meta.json', data: enc.encode(JSON.stringify(m)) });
+      for (const l of m.layers) { const b = await dbGetLayer(m.id + ':' + l.uid); if (b) files.push({ name: m.id + '/' + l.uid + '.png', data: new Uint8Array(b) }); }
+    }
+    const blob = zipBuild(files), name = 'oekaki-backup-' + stamp2() + '.zip';
+    const svc = await getSaver();
+    await svc.save({ filename: name, data: blob });
+    try { localStorage.setItem(BK_KEY, String(Date.now())); } catch (_) {}
+    updateBackupStatus(ws.length); st.textContent = '保存しました: ' + name + '(' + ws.length + '作品)';
+  } catch (err) {
+    updateBackupStatus(hasWorks ? 1 : 0);
+    st.textContent = err && err.code === 'declined' ? '保存をキャンセルしました。' : 'バックアップを保存できませんでした。';
+  }
+}
+async function importBackup(file) {
+  const st = $('#bkStatus'); st.className = ''; st.textContent = '読み込み中…';
+  try {
+    const z = zipRead(await file.arrayBuffer()), dec = new TextDecoder();
+    const man = JSON.parse(dec.decode(await z.get('oekaki-backup.json')));
+    const have = new Map((await dbAllWorks()).map(w => [w.id, w.updated])); let ok = 0, skip = 0;
+    const d = await dbOpen();
+    for (const id of man.works) {
+      const m = JSON.parse(dec.decode(await z.get(id + '/meta.json')));
+      if (have.has(id) && have.get(id) >= m.updated) { skip++; continue; }
+      const rows = [];
+      for (const l of m.layers) { const u = await z.get(id + '/' + l.uid + '.png'); if (u) rows.push({ k: id + ':' + l.uid, buf: u.slice().buffer }); }
+      const t = d.transaction(['works', 'layerdata'], 'readwrite'); rows.forEach(r => t.objectStore('layerdata').put(r)); t.objectStore('works').put(m); await txDone(t); ok++;
+    }
+    st.textContent = ok + '作品を復元しました' + (skip ? '(' + skip + '作品は新しいデータがあるためそのままです)' : '') + '。';
+    await refreshWorks(); st.textContent = ok + '作品を復元しました' + (skip ? '(' + skip + '作品は端末内のほうが新しいためそのままです)' : '') + '。';
+  } catch (_) { st.textContent = 'このファイルは読み込めませんでした。このアプリで書き出した .zip を選んでください。'; }
+}
+$('#bk-out').addEventListener('click', exportBackup);
+$('#bk-in').addEventListener('click', () => $('#bk-file').click());
+$('#bk-file').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) importBackup(f); });
+
+/* ---------- 設定の保存 (ブラシ・色・ウィンドウ配置) ---------- */
+const SKEY = 'oekaki.s';
+function loadSettings() { try { return JSON.parse(localStorage.getItem(SKEY)) || null; } catch (_) { return null; } }
+let setT = 0;
+function saveSettings() {
+  try {
+    const g = {}; wins.forEach(w => { g[w.id] = { l: w.offsetLeft, t: w.offsetTop, w: w.offsetWidth, h: w.offsetHeight }; });
+    localStorage.setItem(SKEY, JSON.stringify({ v: 1, brushes, tool, hsv, sens, g }));
+  } catch (_) {}
+}
+const scheduleSettings = () => { clearTimeout(setT); setT = setTimeout(saveSettings, 500); };
+document.addEventListener('pointerup', scheduleSettings, true);
+document.addEventListener('input', scheduleSettings, true);
+
+/* ---------- export ---------- */
+let dl = null, objUrl = null;
+/* 保存先: Claude内ではdownloads機能、単独で開いたときは共有シート(iPad) → ダウンロードの順 */
+const webSaver = {
+  async save({ filename, data }) {
+    const file = new File([data], filename, { type: data.type || 'application/octet-stream' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); return { status: 'saved' }; }
+      catch (e) { if (e && e.name === 'AbortError') throw { code: 'declined' }; }
+    }
+    const u = URL.createObjectURL(file), a = document.createElement('a');
+    a.href = u; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+    return { status: 'saved' };
+  }
+};
+async function getSaver() {
+  if (dl) return dl;
+  if (window.claude && window.claude.use) { try { const x = await window.claude.use('downloads'); if (x) return x; } catch (_) {} }
+  return webSaver;
+}
+try { if (window.claude && window.claude.use) window.claude.use('downloads').then(x => { dl = x; }, () => {}); } catch (_) {}
+function flatten(bg) {
+  const c = document.createElement('canvas'); c.width = doc.w; c.height = doc.h;
+  const x = c.getContext('2d');
+  if (bg) { x.fillStyle = bg; x.fillRect(0, 0, c.width, c.height); }
+  doc.layers.forEach(L => { if (L.visible) x.drawImage(L.canvas, 0, 0); });
+  return c;
+}
+const stamp2 = () => { const d = new Date(), z = n => String(n).padStart(2, '0'); return d.getFullYear() + z(d.getMonth() + 1) + z(d.getDate()) + '-' + z(d.getHours()) + z(d.getMinutes()); };
+$('#b-export').addEventListener('click', () => { $('#expStatus').textContent = ''; $('#expImg').hidden = true; showDialog('export'); });
+$('#expClose').addEventListener('click', closeDialog);
+async function doExport(kind) {
+  const st = $('#expStatus'), img = $('#expImg');
+  st.textContent = '書き出し中…'; img.hidden = true;
+  const jpg = kind === 'jpg', type = jpg ? 'image/jpeg' : 'image/png';
+  const blob = await new Promise(res => flatten(jpg ? '#ffffff' : null).toBlob(res, type, 0.92));
+  if (!blob) { st.textContent = '書き出しに失敗しました。キャンバスを小さくして試してください。'; return; }
+  const name = 'oekaki-' + stamp2() + '.' + kind;
+  const showImage = msg => {
+    if (objUrl) URL.revokeObjectURL(objUrl);
+    objUrl = URL.createObjectURL(blob); img.src = objUrl; img.hidden = false; st.textContent = msg;
+  };
+  const svc = await getSaver();
+  try {
+    await svc.save({ filename: name, data: blob });
+    st.textContent = '保存しました: ' + name;
+  } catch (err) {
+    if (err && err.code === 'declined') st.textContent = '保存をキャンセルしました。';
+    else showImage('保存できませんでした。画像を長押しして「写真に保存」を選んでください。');
+  }
+}
+$('#exp-png').addEventListener('click', () => doExport('png'));
+$('#exp-jpg').addEventListener('click', () => doExport('jpg'));
+
+/* ---------- init ---------- */
+{
+  const c = rgb2hsv(0x2a, 0x2c, 0x33); hsv = c;
+}
+{
+  let adv = false;
+  try { adv = localStorage.getItem('oekaki.adv') === '1'; } catch (_) {}
+  setAdvanced(adv, false);
+}
+const S0 = loadSettings();
+if (S0) {
+  if (S0.brushes) Object.keys(brushes).forEach(k => {
+    const s = S0.brushes[k]; if (!s) return;
+    if (isFinite(s.size)) brushes[k].size = clamp(Math.round(s.size), 1, 300);
+    if (isFinite(s.min)) brushes[k].min = clamp(s.min, 0, 1);
+    if (isFinite(s.opacity)) brushes[k].opacity = clamp(s.opacity, 0.01, 1);
+  });
+  if (S0.hsv && isFinite(S0.hsv.h) && isFinite(S0.hsv.s) && isFinite(S0.hsv.v)) hsv = { h: S0.hsv.h, s: clamp(S0.hsv.s, 0, 1), v: clamp(S0.hsv.v, 0, 1) };
+  if (isFinite(S0.sens)) sens = clamp(S0.sens, 0, 100);
+}
+updateColor(); syncSliders();
+if (S0 && browEls[S0.tool]) browEls[S0.tool].click();
+newDocument(1024, 1024);
+freezeSizes(); sizeRing(); layoutWindows(); fitView();
+if (S0 && S0.g) {
+  wins.forEach(w => {
+    const g = S0.g[w.id]; if (!g) return;
+    if (w.id !== 'w-tool') {
+      if (isFinite(g.w)) w.style.width = clamp(g.w, MINS[w.id]()[0], ui.clientWidth) + 'px';
+      if (isFinite(g.h)) w.style.height = clamp(g.h, MINS[w.id]()[1], ui.clientHeight) + 'px';
+    }
+    if (isFinite(g.l) && isFinite(g.t)) place(w, g.l, g.t);
+  });
+  sizeRing();
+}
+
+/* 前回の続きから再開 + バックアップのお知らせ */
+(async () => {
+  try {
+    const ws = await dbAllWorks(); updateBackupStatus(ws.length);
+    if (!ws.length) return;
+    if (!doc.touched) {
+      ws.sort((a, b) => b.updated - a.updated);
+      await openWork(ws[0].id); toast('前回の続きから開きました');
+    }
+    if (backupDue()) setTimeout(() => toast('バックアップがしばらく取られていません(作品ボタンから)', 2600), 1800);
+  } catch (_) { dbBroken = true; }
+})();
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
