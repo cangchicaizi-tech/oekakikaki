@@ -610,9 +610,9 @@ function toDoc(e, r) {
 let stroke = null, penDown = false;
 let pick = null, holdTimer = 0;
 const sizeOf = b => b.size;
-function pressureOf(ev) {
+function pressureOf(ev, fb) {
   if (ev.pointerType === 'mouse') return 1;
-  let p = ev.pressure; if (!(p > 0)) p = 0.5;
+  let p = ev.pressure; if (!(p > 0)) p = fb > 0 ? fb : 0.5;
   return Math.min(1, p);
 }
 function diameter(b, p) { return Math.max(0.5, sizeOf(b) * (b.min + (1 - b.min) * p)); }
@@ -704,20 +704,25 @@ function beginStroke(e) {
   stroke.sx = e.clientX; stroke.sy = e.clientY; stroke.moved = false;
   clearTimeout(holdTimer);
   holdTimer = setTimeout(() => { if (stroke && !stroke.moved) startPick(stroke.pid, stroke.sx, stroke.sy); }, HOLD_MS);
-  stroke.carry = stamp(pt.x, pt.y, p);
-  flush();
+  stroke.pending = { x: pt.x, y: pt.y, p };
 }
 function addPoint(ev) {
   const s = stroke, pt = toDoc(ev, s.rect);
   if (!s.moved && Math.hypot(ev.clientX - s.sx, ev.clientY - s.sy) > 6) { s.moved = true; clearTimeout(holdTimer); }
-  const raw = pressureOf(ev);
+  const raw = pressureOf(ev, s.lp);
   pvEl.textContent = '筆圧 ' + raw.toFixed(2);
+  if (s.pending) {
+    /* 最初の一打ちは筆圧が不安定なので、次の点との小さいほうを使う(先頭に丸が出るのを防ぐ) */
+    const q = s.pending; s.pending = null;
+    s.lp = Math.min(q.p, raw); s.lx = q.x; s.ly = q.y; s.carry = stamp(q.x, q.y, s.lp);
+  }
   const p = s.lp + (raw - s.lp) * 0.55;
   strokeTo(pt.x, pt.y, p);
 }
 function endStroke() {
   const s = stroke; if (!s) return;
   clearTimeout(holdTimer);
+  if (s.pending) { const q = s.pending; s.pending = null; stamp(q.x, q.y, q.p); }
   flush(); stroke = null; penDown = false;
   if (!s.dirty || !s.bb) return;
   const { x0, y0, x1, y1 } = s.bb, w = x1 - x0 + 1, h = y1 - y0 + 1, W = doc.w;
