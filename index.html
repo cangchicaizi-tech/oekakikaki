@@ -9,8 +9,8 @@
 <meta name="apple-mobile-web-app-title" content="お絵描き">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon-1024.png">
-<link rel="apple-touch-icon" href="icon-1024.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 <title>お絵描きツール</title>
 <style>
 /* Layout: 灰色の作業面にキャンバス。カラー・ブラシ・レイヤーの窓が左に浮かぶ(ドラッグで移動)。
@@ -140,17 +140,22 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 
 .lbody { display: flex; flex: 1; min-height: 0; gap: 6px; padding: 6px; }
 #llist { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; touch-action: pan-y; scrollbar-width: thin; }
 .lrow {
-  display: flex; align-items: center; gap: 4px; height: 40px; flex: none; padding: 0 6px 0 2px;
+  display: grid; grid-template-columns: 24px auto 1fr auto 20px; grid-template-rows: 28px 18px; column-gap: 3px; align-items: center; height: 48px; flex: none; padding: 0 6px 0 2px; box-sizing: border-box;
   background: var(--well); color: var(--ink); border-radius: 6px; cursor: pointer; touch-action: manipulation;
 }
 .lrow.sel { box-shadow: 0 0 0 2px var(--accent); }
 .lrow.hid { color: #55575c; }
 .lrow.hid .th { opacity: .4; }
-.eye { width: 28px; height: 34px; border: 0; background: transparent; padding: 0; display: grid; place-items: center; cursor: pointer; color: inherit; flex: none; }
+.eye { width: 24px; height: 28px; border: 0; background: transparent; padding: 0; display: grid; place-items: center; cursor: pointer; color: inherit; flex: none; }
 .eye svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .th { flex: none; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .3); display: block; }
-.lname { flex: 1; min-width: 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 3px; }
+.lname { flex: 1; min-width: 0; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 3px; }
 .lock { width: 12px; height: 12px; flex: none; fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.lop-wrap { grid-column: 2 / 6; display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 2px; }
+.lop-wrap input { flex: 1; min-width: 0; height: 18px; }
+.lop-wrap input::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; }
+.lop-wrap input::-webkit-slider-thumb { width: 16px; height: 16px; margin-top: -6px; border-width: 2px; box-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+.lop-wrap b { flex: none; width: 32px; text-align: right; font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .lbtns { display: flex; flex-direction: column; flex: none; gap: 6px; }
 
 .hbtn {
@@ -207,7 +212,7 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 
 #expImg { display: block; max-width: 100%; max-height: 50vh; margin: 10px auto 0; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .2); -webkit-user-select: auto; user-select: auto; -webkit-touch-callout: default; }
 
 /* layer reorder handle */
-.lgrip { width: 24px; height: 34px; flex: none; border: 0; background: transparent; padding: 0; display: grid; place-items: center; color: inherit; cursor: grab; touch-action: none; opacity: .7; }
+.lgrip { width: 20px; height: 28px; flex: none; border: 0; background: transparent; padding: 0; display: grid; place-items: center; color: inherit; cursor: grab; touch-action: none; opacity: .7; }
 .lgrip svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .lrow.drag { opacity: .55; }
 .lrow.dl-top { box-shadow: 0 -3px 0 0 var(--accent); }
@@ -427,9 +432,9 @@ function regionEntry(layer, x, y, w, h, data) {
 function makeLayer(name) {
   const c = document.createElement('canvas'); c.width = doc.w; c.height = doc.h; c.className = 'layer';
   const ctx = c.getContext('2d', { willReadFrequently: true });
-  const k = Math.min(40 / doc.w, 32 / doc.h), tw = Math.max(1, Math.round(doc.w * k)), th = Math.max(1, Math.round(doc.h * k));
+  const k = Math.min(34 / doc.w, 26 / doc.h), tw = Math.max(1, Math.round(doc.w * k)), th = Math.max(1, Math.round(doc.h * k));
   const t = document.createElement('canvas'); t.width = tw * 2; t.height = th * 2; t.className = 'th'; t.style.width = tw + 'px'; t.style.height = th + 'px';
-  return { canvas: c, ctx, thumb: t, visible: true, alphaLock: false, name: name || ('レイヤー ' + (doc.nextId++)), uid: newUid(), dirty: true };
+  return { canvas: c, ctx, thumb: t, visible: true, alphaLock: false, name: name || ('レイヤー ' + (doc.nextId++)), uid: newUid(), dirty: true, opacity: 1 };
 }
 let uidc = 0;
 const newUid = () => Date.now().toString(36) + (uidc++).toString(36) + Math.random().toString(36).slice(2, 5);
@@ -438,7 +443,7 @@ function drawThumb(L) {
   x.drawImage(L.canvas, 0, 0, L.thumb.width, L.thumb.height);
 }
 function syncBoard() {
-  doc.layers.forEach(L => { board.appendChild(L.canvas); L.canvas.style.display = L.visible ? '' : 'none'; });
+  doc.layers.forEach(L => { board.appendChild(L.canvas); L.canvas.style.display = L.visible ? '' : 'none'; L.canvas.style.opacity = L.opacity < 1 ? L.opacity : ''; });
 }
 function insertLayer(L, idx) { doc.layers.splice(idx, 0, L); L.dirty = true; syncBoard(); drawThumb(L); renderLayers(); }
 function removeLayer(L) {
@@ -459,7 +464,7 @@ function addLayer() {
 function dupLayer() {
   if (doc.layers.length >= layerMax()) { toast('このサイズは' + layerMax() + '枚までです'); return; }
   const src = activeLayer, L = makeLayer(src.name + ' のコピー'), idx = doc.layers.indexOf(src) + 1;
-  L.ctx.drawImage(src.canvas, 0, 0);
+  L.ctx.drawImage(src.canvas, 0, 0); L.opacity = src.opacity;
   insertLayer(L, idx); setActive(L);
   pushHistory({ undo: () => removeLayer(L), redo: () => { insertLayer(L, idx); setActive(L); } });
 }
@@ -469,17 +474,19 @@ function delLayer() {
   removeLayer(L);
   pushHistory({ undo: () => { insertLayer(L, idx); setActive(L); }, redo: () => removeLayer(L) });
 }
+function bake(B, L) { B.ctx.globalAlpha = L.opacity; B.ctx.drawImage(L.canvas, 0, 0); B.ctx.globalAlpha = 1; }
+function setOpacity(L, v) { L.opacity = v; L.canvas.style.opacity = v < 1 ? v : ''; scheduleSave(); }
 function mergeDown() {
   const L = activeLayer, i = doc.layers.indexOf(L);
   if (i <= 0) { toast('いちばん下のレイヤーは結合できません'); return; }
   const B = doc.layers[i - 1];
   if (!L.visible || !B.visible) { toast('非表示のレイヤーは結合できません'); return; }
   const before = B.ctx.getImageData(0, 0, doc.w, doc.h);
-  B.ctx.drawImage(L.canvas, 0, 0); B.dirty = true; drawThumb(B);
+  bake(B, L); B.dirty = true; drawThumb(B);
   removeLayer(L); setActive(B);
   pushHistory({
     undo: () => { B.ctx.putImageData(before, 0, 0); B.dirty = true; drawThumb(B); insertLayer(L, i); setActive(L); },
-    redo: () => { B.ctx.drawImage(L.canvas, 0, 0); B.dirty = true; drawThumb(B); removeLayer(L); setActive(B); }
+    redo: () => { bake(B, L); B.dirty = true; drawThumb(B); removeLayer(L); setActive(B); }
   });
   toast('「' + B.name + '」に結合しました');
 }
@@ -541,11 +548,26 @@ function renderLayers() {
     gr.addEventListener('pointerdown', ev => startReorder(ev, L, row, gr));
     gr.addEventListener('click', ev => ev.stopPropagation());
     row.appendChild(gr);
+    const ow = document.createElement('div'); ow.className = 'lop-wrap';
+    const rg = document.createElement('input'); rg.type = 'range'; rg.min = 0; rg.max = 100; rg.step = 1; rg.value = Math.round(L.opacity * 100);
+    rg.setAttribute('aria-label', L.name + ' の不透明度'); rg.title = '不透明度';
+    const ov = document.createElement('b'); ov.textContent = rg.value + '%';
+    const paint = () => { rg.style.setProperty('--p', rg.value + '%'); ov.textContent = rg.value + '%'; };
+    paint();
+    let startV = L.opacity;
+    rg.addEventListener('pointerdown', () => { startV = L.opacity; });
+    rg.addEventListener('input', () => { paint(); setOpacity(L, +rg.value / 100); });
+    rg.addEventListener('change', () => {
+      const nv = L.opacity, ov0 = startV; if (nv === ov0) return;
+      pushHistory({ undo: () => { setOpacity(L, ov0); renderLayers(); }, redo: () => { setOpacity(L, nv); renderLayers(); } });
+    });
+    ['click', 'pointerdown'].forEach(t => rg.addEventListener(t, ev => ev.stopPropagation()));
+    ow.append(rg, ov); row.appendChild(ow);
     row.addEventListener('click', () => setActive(L));
     llist.appendChild(row);
   }
   const mx = layerMax();
-  if (!frozen) llist.style.height = (mx * 40 + (mx - 1) * 4) + 'px';
+  if (!frozen) llist.style.height = (mx * 48 + (mx - 1) * 4) + 'px';
   $('#lcount').textContent = doc.layers.length + ' / ' + mx;
   updateButtons();
 }
@@ -754,7 +776,7 @@ function sampleColor(x, y) {
   let r = 255, g = 255, b = 255;
   doc.layers.forEach(L => {
     if (!L.visible) return;
-    const d = L.ctx.getImageData(x, y, 1, 1).data, a = d[3] / 255;
+    const d = L.ctx.getImageData(x, y, 1, 1).data, a = d[3] / 255 * L.opacity;
     if (!a) return;
     r = d[0] * a + r * (1 - a); g = d[1] * a + g * (1 - a); b = d[2] * a + b * (1 - a);
   });
@@ -1009,7 +1031,7 @@ const MINS = {
   'w-tool': () => [120, 0],
   'w-color': () => [150, 26 + 110 + 16],
   'w-brush': () => [180, 26 + 44 + slidersEl.offsetHeight],
-  'w-layer': () => [170, 26 + 5 * 34 + 4 * 6 + 12]
+  'w-layer': () => [190, 26 + 5 * 34 + 4 * 6 + 12]
 };
 function sizeRing() {
   const w = $('#w-color'), s = clamp(Math.min(w.clientWidth - 20, w.clientHeight - 26 - 16), 96, 420);
@@ -1103,7 +1125,7 @@ function makeThumb() {
   c.width = Math.max(1, Math.round(doc.w * k)); c.height = Math.max(1, Math.round(doc.h * k));
   const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
   x.imageSmoothingQuality = 'high';
-  doc.layers.forEach(L => { if (L.visible) x.drawImage(L.canvas, 0, 0, c.width, c.height); });
+  doc.layers.forEach(L => { if (L.visible) { x.globalAlpha = L.opacity; x.drawImage(L.canvas, 0, 0, c.width, c.height); } });
   return c.toDataURL('image/jpeg', 0.7);
 }
 function saveNow() {
@@ -1114,7 +1136,7 @@ function saveNow() {
   const meta = {
     id, w: doc.w, h: doc.h, updated: Date.now(), thumb: makeThumb(), nextId: doc.nextId,
     active: activeLayer ? activeLayer.uid : null,
-    layers: doc.layers.map(L => ({ uid: L.uid, name: L.name, visible: L.visible, alphaLock: L.alphaLock }))
+    layers: doc.layers.map(L => ({ uid: L.uid, name: L.name, visible: L.visible, alphaLock: L.alphaLock, opacity: L.opacity }))
   };
   const dirtyLs = doc.layers.filter(L => L.dirty);
   const jobs = dirtyLs.map(L => { L.dirty = false; return canvasBlob(L.canvas).then(b => b.arrayBuffer()).then(buf => ({ k: id + ':' + L.uid, buf })); });
@@ -1150,7 +1172,7 @@ async function openWork(id) {
   resetDoc(m.w, m.h);
   doc.id = id; doc.nextId = m.nextId || m.layers.length + 1;
   m.layers.forEach((l, i) => {
-    const L = makeLayer(l.name); L.uid = l.uid; L.visible = l.visible !== false; L.alphaLock = !!l.alphaLock; L.dirty = false;
+    const L = makeLayer(l.name); L.uid = l.uid; L.visible = l.visible !== false; L.alphaLock = !!l.alphaLock; L.opacity = isFinite(l.opacity) ? clamp(l.opacity, 0, 1) : 1; L.dirty = false;
     doc.layers.push(L); loadQ.push(bufs[i] ? loadLayerInto(L, bufs[i]) : null);
   });
   await Promise.all(loadQ.splice(0));
@@ -1337,7 +1359,8 @@ function flatten(bg) {
   const c = document.createElement('canvas'); c.width = doc.w; c.height = doc.h;
   const x = c.getContext('2d');
   if (bg) { x.fillStyle = bg; x.fillRect(0, 0, c.width, c.height); }
-  doc.layers.forEach(L => { if (L.visible) x.drawImage(L.canvas, 0, 0); });
+  doc.layers.forEach(L => { if (L.visible) { x.globalAlpha = L.opacity; x.drawImage(L.canvas, 0, 0); } });
+  x.globalAlpha = 1;
   return c;
 }
 const stamp2 = () => { const d = new Date(), z = n => String(n).padStart(2, '0'); return d.getFullYear() + z(d.getMonth() + 1) + z(d.getDate()) + '-' + z(d.getHours()) + z(d.getMinutes()); };
