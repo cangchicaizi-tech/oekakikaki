@@ -31,8 +31,9 @@
   color-scheme: light;
 }
 html, body { height: 100%; }
+@media all and (display-mode: standalone) { html, body { height: 100vh; } }
 body {
-  margin: 0; position: relative; overflow: hidden;
+    margin: 0; position: fixed; inset: 0; overflow: hidden;
   background: var(--ws); color: var(--ink);
   font: 12px/1.4 var(--font);
   overscroll-behavior: none;
