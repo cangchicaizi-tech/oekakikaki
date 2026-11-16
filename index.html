@@ -287,10 +287,8 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 
       <input class="adv" type="range" id="r-min" min="0" max="100" step="1" aria-label="最小サイズ">
       <div class="sl-h"><span>不透明度</span><b id="v-op">100%</b></div>
       <input type="range" id="r-op" min="1" max="100" step="1" aria-label="不透明度">
-      <div class="sl-h grainrow" hidden><span>ざらつき</span><b id="v-grain">40%</b></div>
+      <div class="sl-h grainrow" hidden><span>ざらつき</span><b id="v-grain">0%</b></div>
       <input class="grainrow" type="range" id="r-grain" min="0" max="100" step="1" aria-label="ざらつき" hidden>
-      <div class="sl-h adv"><span>筆圧感度(全ブラシ共通)</span><b id="v-sens">60</b></div>
-      <input class="adv" type="range" id="r-sens" min="0" max="100" step="1" aria-label="筆圧感度">
     </div>
   </section>
 
@@ -385,20 +383,20 @@ let strokeBuf = null;
 const brushes = {
   pencil: { size: 14, min: 0.2, opacity: 1 },
   eraser: { size: 48, min: 0.35, opacity: 1 },
-  flat: { size: 60, min: 0.4, opacity: 0.7, grain: 40 },
+  flat: { size: 60, min: 0.4, opacity: 1, grain: 0 },
   dotpen: { size: 3, min: 1, opacity: 1 }
 };
 /* aa: 縁のなめらかさ(アンチエイリアス)。pressOp: 筆圧で濃さを変えるか */
 const DEFS = {
   pencil: { label: '鉛筆', erase: false, aa: true, pressOp: true },
   eraser: { label: '消しゴム', erase: true, aa: true, pressOp: true },
-  flat: { label: '厚塗り筆', erase: false, aa: true, pressOp: true, flat: true },
+  flat: { label: '平筆', erase: false, aa: true, pressOp: true, flat: true },
   dotpen: { label: 'ドット鉛筆', erase: false, aa: false, pressOp: true }
 };
 let tool = 'pencil';
 let hsv = { h: 222, s: 0.25, v: 0.2 };
 let rgb = [0, 0, 0];
-let sens = 75;
+const sens = 100;   /* 筆圧感度は100で固定(スライダーは廃止) */
 let frozen = false;
 const pvEl = $('#pv');
 
@@ -1107,24 +1105,22 @@ function drawPreview(key) {
   x.globalAlpha = b.opacity; x.drawImage(tmpC, 0, 0); x.globalAlpha = 1;
 }
 function drawPreviews() { Object.keys(DEFS).forEach(drawPreview); }
-const rSize = $('#r-size'), rMin = $('#r-min'), rOp = $('#r-op'), rSens = $('#r-sens'), rGrain = $('#r-grain');
+const rSize = $('#r-size'), rMin = $('#r-min'), rOp = $('#r-op'), rGrain = $('#r-grain');
 const sizeFromSlider = v => Math.round(1 + Math.pow(v / 1000, 2) * 299);
 const sliderFromSize = s => Math.round(Math.sqrt((s - 1) / 299) * 1000);
 function paintSlider(el) { el.style.setProperty('--p', ((el.value - el.min) / (el.max - el.min) * 100) + '%'); }
 function syncSliders() {
   const b = brushes[tool];
   rSize.value = sliderFromSize(b.size); rMin.value = Math.round(b.min * 100); rOp.value = Math.round(b.opacity * 100);
-  rSens.value = sens; $('#v-sens').textContent = sens;
   const isFlat = !!DEFS[tool].flat;
   $$('.grainrow').forEach(el => { el.hidden = !isFlat; });
   if (isFlat) { rGrain.value = b.grain; $('#v-grain').textContent = b.grain + '%'; }
-  [rSize, rMin, rOp, rSens, rGrain].forEach(paintSlider);
+  [rSize, rMin, rOp, rGrain].forEach(paintSlider);
   $('#v-size').textContent = b.size + 'px'; $('#v-min').textContent = Math.round(b.min * 100) + '%'; $('#v-op').textContent = Math.round(b.opacity * 100) + '%';
 }
 rSize.addEventListener('input', () => { brushes[tool].size = sizeFromSlider(+rSize.value); syncSliders(); drawPreview(tool); });
 rMin.addEventListener('input', () => { brushes[tool].min = +rMin.value / 100; syncSliders(); drawPreview(tool); });
 rOp.addEventListener('input', () => { brushes[tool].opacity = +rOp.value / 100; syncSliders(); drawPreview(tool); });
-rSens.addEventListener('input', () => { sens = +rSens.value; syncSliders(); });
 rGrain.addEventListener('input', () => { brushes[tool].grain = +rGrain.value; syncSliders(); drawPreview(tool); });
 
 /* 最小サイズ・筆圧感度スライダーの表示切り替え(窓の高さも一緒に増減) */
@@ -1443,7 +1439,7 @@ let setT = 0;
 function saveSettings() {
   try {
     const g = {}; wins.forEach(w => { g[w.id] = { l: w.offsetLeft, t: w.offsetTop, w: w.offsetWidth, h: w.offsetHeight }; });
-    localStorage.setItem(SKEY, JSON.stringify({ v: 1, brushes, tool, hsv, sens, g }));
+    localStorage.setItem(SKEY, JSON.stringify({ v: 1, brushes, tool, hsv, g }));
   } catch (_) {}
 }
 const scheduleSettings = () => { clearTimeout(setT); setT = setTimeout(saveSettings, 500); };
@@ -1528,7 +1524,6 @@ if (S0) {
     if (isFinite(s.grain)) brushes[k].grain = clamp(Math.round(s.grain), 0, 100);
   });
   if (S0.hsv && isFinite(S0.hsv.h) && isFinite(S0.hsv.s) && isFinite(S0.hsv.v)) hsv = { h: S0.hsv.h, s: clamp(S0.hsv.s, 0, 1), v: clamp(S0.hsv.v, 0, 1) };
-  if (isFinite(S0.sens)) sens = clamp(S0.sens, 0, 100);
 }
 updateColor(); syncSliders();
 if (S0 && browEls[S0.tool]) browEls[S0.tool].click();

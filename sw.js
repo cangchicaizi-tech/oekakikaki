@@ -1,5 +1,5 @@
 // オフライン用: ネットにつながっていれば常に最新を取り、つながらないときだけ保存分を使う
-const CACHE = 'oekaki-v1.4.0';
+const CACHE = 'oekaki-v1.4.1';
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => Promise.all(['./', 'index.html'].map(u => c.add(new Request(u, { cache: 'reload' })).catch(() => {})))).then(() => self.skipWaiting()));
 });
