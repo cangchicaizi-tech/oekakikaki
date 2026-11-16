@@ -31,15 +31,16 @@
   color-scheme: light;
 }
 html, body { height: 100%; }
-@media all and (display-mode: standalone) { html, body { height: 100vh; } }
 body {
-    margin: 0; position: fixed; inset: 0; overflow: hidden;
+  margin: 0; position: fixed; inset: 0; overflow: hidden;
   background: var(--ws); color: var(--ink);
   font: 12px/1.4 var(--font);
   overscroll-behavior: none;
   -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
 }
+/* ホーム画面のアプリ(iPad)では、下の安全領域まで含めた画面いっぱいの高さにする */
+@media all and (display-mode: standalone) { html, body { height: 100vh; } }
 [hidden] { display: none !important; }
 button { font: inherit; color: inherit; }
 
@@ -286,6 +287,8 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 
       <input class="adv" type="range" id="r-min" min="0" max="100" step="1" aria-label="最小サイズ">
       <div class="sl-h"><span>不透明度</span><b id="v-op">100%</b></div>
       <input type="range" id="r-op" min="1" max="100" step="1" aria-label="不透明度">
+      <div class="sl-h grainrow" hidden><span>ざらつき</span><b id="v-grain">40%</b></div>
+      <input class="grainrow" type="range" id="r-grain" min="0" max="100" step="1" aria-label="ざらつき" hidden>
       <div class="sl-h adv"><span>筆圧感度(全ブラシ共通)</span><b id="v-sens">60</b></div>
       <input class="adv" type="range" id="r-sens" min="0" max="100" step="1" aria-label="筆圧感度">
     </div>
@@ -382,15 +385,15 @@ let strokeBuf = null;
 const brushes = {
   pencil: { size: 14, min: 0.2, opacity: 1 },
   eraser: { size: 48, min: 0.35, opacity: 1 },
-  dotpen: { size: 3, min: 1, opacity: 1 },
-  doterase: { size: 6, min: 1, opacity: 1 }
+  flat: { size: 60, min: 0.4, opacity: 0.7, grain: 40 },
+  dotpen: { size: 3, min: 1, opacity: 1 }
 };
 /* aa: 縁のなめらかさ(アンチエイリアス)。pressOp: 筆圧で濃さを変えるか */
 const DEFS = {
   pencil: { label: '鉛筆', erase: false, aa: true, pressOp: true },
   eraser: { label: '消しゴム', erase: true, aa: true, pressOp: true },
-  dotpen: { label: 'ドット鉛筆', erase: false, aa: false, pressOp: true },
-  doterase: { label: 'ドット消しゴム', erase: true, aa: false, pressOp: true }
+  flat: { label: '厚塗り筆', erase: false, aa: true, pressOp: true, flat: true },
+  dotpen: { label: 'ドット鉛筆', erase: false, aa: false, pressOp: true }
 };
 let tool = 'pencil';
 let hsv = { h: 222, s: 0.25, v: 0.2 };
@@ -671,16 +674,68 @@ function dab(cx, cy, r, a, aa) {
   const u = (o) => { if (!o) return { x0, y0, x1, y1 }; o.x0 = Math.min(o.x0, x0); o.y0 = Math.min(o.y0, y0); o.x1 = Math.max(o.x1, x1); o.y1 = Math.max(o.y1, y1); return o; };
   s.fr = u(s.fr); s.bb = u(s.bb);
 }
+/* ---------- 厚塗り筆: 平たい筆先 + 毛のかすれ ----------
+   筆先は細長い平筆で、描く方向に向きが追従する(横幅 > 厚み)。ざらつきは、毛の筋(筆の幅方向の濃淡)と細かい粒の2つで濃さを削る。 */
+const GT = (() => {   /* 細かい粒のざらつき(256x256, 隣と少しなじませる) */
+  const n = new Float32Array(256 * 256), o = new Uint8Array(256 * 256);
+  for (let i = 0; i < n.length; i++) n[i] = Math.random();
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+    const v = (n[y * 256 + x] * 2 + n[y * 256 + ((x + 1) & 255)] + n[((y + 1) & 255) * 256 + x]) / 4;
+    o[y * 256 + x] = Math.min(255, Math.max(0, (v - 0.25) * 2 * 255));
+  }
+  return o;
+})();
+function newBristles(n) {   /* 1回の線ごとに毛の筋を作る(隣となじませた乱数) */
+  const r = new Float32Array(n), o = new Float32Array(n);
+  for (let i = 0; i < n; i++) r[i] = Math.random();
+  for (let i = 0; i < n; i++) o[i] = Math.min(1, Math.max(0.15, 0.2 + 1.05 * (r[i] * 0.5 + r[Math.max(0, i - 1)] * 0.25 + r[Math.min(n - 1, i + 1)] * 0.25)));
+  return o;
+}
+function flatDab(cx, cy, hw, ang, a) {
+  const s = stroke, W = doc.w, H = doc.h, buf = s.buf, hh = Math.max(0.6, hw * 0.3);
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const ex = Math.abs(ca) * hw + Math.abs(sa) * hh + 1.5, ey = Math.abs(sa) * hw + Math.abs(ca) * hh + 1.5;
+  const x0 = Math.max(0, Math.floor(cx - ex)), x1 = Math.min(W - 1, Math.ceil(cx + ex));
+  const y0 = Math.max(0, Math.floor(cy - ey)), y1 = Math.min(H - 1, Math.ceil(cy + ey));
+  if (x0 > x1 || y0 > y1) return;
+  const gr = s.grain, br = s.bristle, NB = br.length;
+  let hit = false;
+  for (let y = y0; y <= y1; y++) {
+    const dy = y + 0.5 - cy;
+    for (let x = x0; x <= x1; x++) {
+      const dx = x + 0.5 - cx, u = dx * ca + dy * sa, v = -dx * sa + dy * ca, ru = u / hw, rv = v / hh;
+      const r4 = ru * ru * ru * ru + rv * rv * rv * rv; if (r4 > 2.2) continue;
+      const rho = Math.sqrt(Math.sqrt(r4)); let cov = (1 - rho) * hh * 1.2 + 0.5; if (cov <= 0) continue; if (cov > 1) cov = 1;
+      let m = 1;
+      if (gr > 0) {
+        let bi = ((ru * 0.5 + 0.5) * NB) | 0; if (bi < 0) bi = 0; else if (bi >= NB) bi = NB - 1;
+        m = (1 - gr * (1 - br[bi])) * (1 - gr * 0.5 * GT[(x & 255) | ((y & 255) << 8)] / 255);
+      }
+      const val = Math.round(a * cov * m), i = y * W + x;
+      if (val > buf[i]) { buf[i] = val; hit = true; }
+    }
+  }
+  if (!hit) return;
+  s.dirty = true;
+  const un = (o) => { if (!o) return { x0, y0, x1, y1 }; o.x0 = Math.min(o.x0, x0); o.y0 = Math.min(o.y0, y0); o.x1 = Math.max(o.x1, x1); o.y1 = Math.max(o.y1, y1); return o; };
+  s.fr = un(s.fr); s.bb = un(s.bb);
+}
 function stamp(x, y, p) {
   const s = stroke, b = s.b, pe = Math.min(1, p / s.full), d = diameter(b, pe);
   const po = b.pressOp && !(s.erase && b.opacity >= 0.995);   /* 消しゴムは不透明度100%なら筆圧で薄くならない */
   const a = b.opacity * (po ? 0.1 + 0.9 * pe : 1) * 255;
-  dab(x, y, d / 2, a, b.aa);
-  return Math.max(0.5, d * 0.07);
+  /* 間隔: ほぼ0(直径の2%、最小0.35px)。点が連なって見えず、なめらかにつながる */
+  const sp = b.aa ? Math.max(0.35, d * 0.02) : Math.max(0.5, d * 0.07);   /* ドットは画素単位なのでこれまで通り */
+  if (s.flat) flatDab(x, y, d / 2, (s.ang || 0) + Math.PI / 2, a); else dab(x, y, d / 2, a, b.aa);
+  return sp;
 }
 function strokeTo(x, y, p) {
   const s = stroke, dx = x - s.lx, dy = y - s.ly, L = Math.hypot(dx, dy);
   if (L === 0) { s.lp = p; return; }
+  if (s.flat && L >= 1) {   /* 筆先の向き: 進む方向に、少しなじませながら追従 */
+    const t0 = Math.atan2(dy, dx);
+    if (s.ang == null) s.ang = t0; else { let df = t0 - s.ang; while (df > Math.PI) df -= 2 * Math.PI; while (df < -Math.PI) df += 2 * Math.PI; s.ang += df * 0.25; }
+  }
   let t = s.carry;
   while (t <= L) {
     const k = t / L;
@@ -756,6 +811,7 @@ function beginStroke(e) {
   const b = brushes[tool];
   const before = L.ctx.getImageData(0, 0, doc.w, doc.h);
   stroke = { pid: e.pointerId, layer: L, ctx: L.ctx, before, buf: strokeBuf, color: rgb.slice(), erase: DEFS[tool].erase, lock: L.alphaLock,
+    flat: !!DEFS[tool].flat, grain: DEFS[tool].flat ? clamp(b.grain, 0, 100) / 100 : 0, bristle: DEFS[tool].flat ? newBristles(36) : null, ang: null,
     b: { size: b.size, min: b.min, opacity: b.opacity, aa: DEFS[tool].aa, pressOp: DEFS[tool].pressOp }, full: 1.05 - 0.8 * sens / 100, bb: null, fr: null, dirty: false, lx: 0, ly: 0, lp: 0, carry: 0, rect: stage.getBoundingClientRect() };
   try { stage.setPointerCapture(e.pointerId); } catch (_) {}
   const pt = toDoc(e, stroke.rect), p = pressureOf(e);
@@ -774,6 +830,7 @@ function addPoint(ev) {
   if (s.pending) {
     /* 最初の一打ちは筆圧が不安定なので、次の点との小さいほうを使う(先頭に丸が出るのを防ぐ) */
     const q = s.pending; s.pending = null;
+    if (s.flat) s.ang = Math.hypot(pt.x - q.x, pt.y - q.y) >= 0.5 ? Math.atan2(pt.y - q.y, pt.x - q.x) : 0;
     s.lp = Math.min(q.p, raw); s.lx = q.x; s.ly = q.y; s.carry = stamp(q.x, q.y, s.lp);
   }
   const p = s.lp + (raw - s.lp) * 0.55;
@@ -1021,6 +1078,8 @@ Object.keys(DEFS).forEach(key => {
   b.append(c, sp); prevCanvas[key] = c; browEls[key] = b;
   b.addEventListener('click', () => {
     tool = key; setMoveMode(false); syncSliders();
+    const br = b.getBoundingClientRect(), bx = brows.getBoundingClientRect();
+    if (br.top < bx.top) brows.scrollTop += br.top - bx.top; else if (br.bottom > bx.bottom) brows.scrollTop += br.bottom - bx.bottom;
   });
   brows.appendChild(b);
 });
@@ -1035,7 +1094,10 @@ function drawPreview(key) {
   for (let i = 0; i <= N; i++) {
     const u = i / N, px = 30 + u * (W - 60), py = H / 2 + 4 + Math.sin(u * Math.PI * 2) * H * 0.2;
     const p = Math.pow(Math.sin(Math.PI * u), 0.7), d = minD + (maxD - minD) * p;
-    t.beginPath(); t.arc(px, py, d / 2, 0, Math.PI * 2); t.fill();
+    if (DEFS[key].flat) {
+      const tg = Math.atan2(Math.cos(u * Math.PI * 2) * H * 0.2 * Math.PI * 2 / (W - 60), 1), hw = Math.min(d / 2, H * 0.42);
+      t.save(); t.translate(px, py); t.rotate(tg + Math.PI / 2); t.fillRect(-hw, -hw * 0.3, hw * 2, hw * 0.6); t.restore();
+    } else { t.beginPath(); t.arc(px, py, d / 2, 0, Math.PI * 2); t.fill(); }
   }
   if (!DEFS[key].aa) {
     const id = t.getImageData(0, 0, W, H), q = id.data;
@@ -1045,7 +1107,7 @@ function drawPreview(key) {
   x.globalAlpha = b.opacity; x.drawImage(tmpC, 0, 0); x.globalAlpha = 1;
 }
 function drawPreviews() { Object.keys(DEFS).forEach(drawPreview); }
-const rSize = $('#r-size'), rMin = $('#r-min'), rOp = $('#r-op'), rSens = $('#r-sens');
+const rSize = $('#r-size'), rMin = $('#r-min'), rOp = $('#r-op'), rSens = $('#r-sens'), rGrain = $('#r-grain');
 const sizeFromSlider = v => Math.round(1 + Math.pow(v / 1000, 2) * 299);
 const sliderFromSize = s => Math.round(Math.sqrt((s - 1) / 299) * 1000);
 function paintSlider(el) { el.style.setProperty('--p', ((el.value - el.min) / (el.max - el.min) * 100) + '%'); }
@@ -1053,13 +1115,17 @@ function syncSliders() {
   const b = brushes[tool];
   rSize.value = sliderFromSize(b.size); rMin.value = Math.round(b.min * 100); rOp.value = Math.round(b.opacity * 100);
   rSens.value = sens; $('#v-sens').textContent = sens;
-  [rSize, rMin, rOp, rSens].forEach(paintSlider);
+  const isFlat = !!DEFS[tool].flat;
+  $$('.grainrow').forEach(el => { el.hidden = !isFlat; });
+  if (isFlat) { rGrain.value = b.grain; $('#v-grain').textContent = b.grain + '%'; }
+  [rSize, rMin, rOp, rSens, rGrain].forEach(paintSlider);
   $('#v-size').textContent = b.size + 'px'; $('#v-min').textContent = Math.round(b.min * 100) + '%'; $('#v-op').textContent = Math.round(b.opacity * 100) + '%';
 }
 rSize.addEventListener('input', () => { brushes[tool].size = sizeFromSlider(+rSize.value); syncSliders(); drawPreview(tool); });
 rMin.addEventListener('input', () => { brushes[tool].min = +rMin.value / 100; syncSliders(); drawPreview(tool); });
 rOp.addEventListener('input', () => { brushes[tool].opacity = +rOp.value / 100; syncSliders(); drawPreview(tool); });
 rSens.addEventListener('input', () => { sens = +rSens.value; syncSliders(); });
+rGrain.addEventListener('input', () => { brushes[tool].grain = +rGrain.value; syncSliders(); drawPreview(tool); });
 
 /* 最小サイズ・筆圧感度スライダーの表示切り替え(窓の高さも一緒に増減) */
 const bAdv = $('#b-adv'), slidersEl = $('.sliders');
@@ -1459,6 +1525,7 @@ if (S0) {
     if (isFinite(s.size)) brushes[k].size = clamp(Math.round(s.size), 1, 300);
     if (isFinite(s.min)) brushes[k].min = clamp(s.min, 0, 1);
     if (isFinite(s.opacity)) brushes[k].opacity = clamp(s.opacity, 0.01, 1);
+    if (isFinite(s.grain)) brushes[k].grain = clamp(Math.round(s.grain), 0, 100);
   });
   if (S0.hsv && isFinite(S0.hsv.h) && isFinite(S0.hsv.s) && isFinite(S0.hsv.v)) hsv = { h: S0.hsv.h, s: clamp(S0.hsv.s, 0, 1), v: clamp(S0.hsv.v, 0, 1) };
   if (isFinite(S0.sens)) sens = clamp(S0.sens, 0, 100);
